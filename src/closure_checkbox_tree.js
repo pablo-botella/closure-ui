@@ -30,8 +30,10 @@ Two visual modes:
 | Attribute | Description |
 |---|---|
 | `name="x"`              | tree name (used in paths and as the form field name) |
+| `branch-name="omit"`    | leave the tree name out of the paths (`/<item>/…` instead of `/<name>/<item>/…`); default `include`. Also inherited from the enclosing `<closure-checkbox-group>` |
 | `expanded`              | render the full tree inline instead of the collapsed pill |
 | `readonly`              | disable every checkbox in shadow DOM |
+| `send-only-active`      | emit only the nodes that are on: checked leaves and parents whose tree value is not `0`. Also inherited from the enclosing `<closure-checkbox-group>` |
 | `label-all="All"`       | label for the All state |
 | `label-none="None"`     | label for the None state |
 | `label-custom="Custom"` | label for the Custom state |
@@ -52,7 +54,7 @@ The form value is a minified JSON string with the shape:
 
 | Field | Meaning |
 |---|---|
-| `path` | leading-slash path through the tree, e.g. `/section/sub-1` |
+| `path` | leading-slash path through the tree, e.g. `/section/sub-1`; it starts with the tree `name` unless `branch-name="omit"` |
 | `v`    | leaf value — `0` (off) or non-zero (on); `null` for parents |
 | `vt`   | tree value — `0` (none), `1` (all), `2` (custom); `null` for leaves |
 
@@ -66,7 +68,7 @@ The form value is a minified JSON string with the shape:
 
 | Method | Description |
 |---|---|
-| `getValues()`     | array of `[path, v, vt]` for all nodes |
+| `getValues()`     | array of `[path, v, vt]` for all nodes (only the active ones with `send-only-active`) |
 | `setValues(arr)`  | restore from `[[path, v, vt], …]` |
 | `checkAll()`      | check every leaf |
 | `uncheckAll()`    | uncheck every leaf |
@@ -110,6 +112,23 @@ Fired on any leaf or parent state change.
 > **Note:** `setValues` ignores entries whose `path` doesn't exist in
 > the current tree. Useful when restoring data from a wider permission
 > set than is currently displayed.
+
+> **Note:** with `send-only-active` the value lists only what is on: a
+> leaf appears when it is checked (`[path, 1, null]`) and a parent when
+> its tree value is `1` (all) or `2` (custom). Unchecked leaves and
+> fully-off parents are left out, so an absent path means "off" and a
+> tree with nothing checked submits `[]`. It only shapes the output:
+> `src` and `setValues` take the same data either way. The attribute is
+> looked up each time the value is computed; toggling it at runtime
+> reaches the submitted form value on the next change.
+
+> **Note:** with `branch-name="omit"` the paths carry only the
+> `<cbt-item>` names: a tree whose single root item is `users` emits
+> `/users`, `/users/view`, … whatever the tree itself is called. Use it
+> when the server already owns a path scheme and the tree name is just
+> a label for the widget. The attribute is read once, when the tree is
+> built. See [`<closure-checkbox-group>`](#closure-checkbox-group) for a
+> side-by-side table of both forms.
 
 ---
 %%>*/
@@ -194,9 +213,10 @@ class CheckboxTree extends HTMLElement {
     var items = this.querySelectorAll(':scope > cbt-item');
     var self = this;
     // Paths include the tree's name (`/<treeName>/<item>/…`) — that's
-    // the prefix _loadFromSrc and the group's flat setValues filter by
+    // the prefix _loadFromSrc and the group's flat setValues filter by —
+    // unless branch-name="omit" leaves it out (`/<item>/…`)
     var treeName = this.getAttribute('name') || '';
-    var base = treeName ? '/' + treeName : '';
+    var base = (treeName && !this._isBranchNameOmitted()) ? '/' + treeName : '';
     items.forEach(function(item) {
       self._treeRoot.appendChild(self._buildNode(item, base));
     });
@@ -577,10 +597,34 @@ class CheckboxTree extends HTMLElement {
   }
 
   // ---
+  // send-only-active trims the emitted value to the nodes that are on. The
+  // tree's own attribute or its group's — either one turns it on.
   _isSendOnlyActive() {
     if (this.hasAttribute('send-only-active')) return true;
     var group = this.closest('closure-checkbox-group');
     return group && group.hasAttribute('send-only-active');
+  }
+
+  // ---
+  // branch-name="omit" keeps the tree's name out of its paths. The tree's
+  // own attribute wins; otherwise it is inherited from the group.
+  _isBranchNameOmitted() {
+    var v = this.getAttribute('branch-name');
+    if (v === null) {
+      var group = this.closest('closure-checkbox-group');
+      if (group) v = group.getAttribute('branch-name');
+    }
+    return v === 'omit';
+  }
+
+  // ---
+  // Prefix shared by every path of this tree, used to pick its entries out
+  // of a flat list. With the branch name omitted there is nothing to tell
+  // the trees apart, so the prefix matches everything and setValues keeps
+  // only the paths this tree actually has.
+  _pathPrefix() {
+    if (this._isBranchNameOmitted()) return '/';
+    return '/' + (this.getAttribute('name') || '') + '/';
   }
 
   // ---
@@ -667,7 +711,7 @@ class CheckboxTree extends HTMLElement {
     try {
       var data = JSON.parse(el.textContent);
       if (!Array.isArray(data)) return;
-      var prefix = '/' + (this.getAttribute('name') || '') + '/';
+      var prefix = this._pathPrefix();
       var subset = data.filter(function(entry) {
         return entry[0].indexOf(prefix) === 0;
       });
