@@ -417,7 +417,8 @@
   <li><code>output="flat"</code> (default): a single array
     <code>[[path, v, vt], &hellip;]</code> with every tree's entries concatenated
     in DOM order; each path starts with
-    <code>/&lt;treeName&gt;/&hellip;</code>, so the server can demultiplex.</li>
+    <code>/&lt;treeName&gt;/&hellip;</code>, so the server can demultiplex
+    (<code>branch-name="omit"</code> drops that segment &mdash; see below).</li>
   <li><code>output="sections"</code>: an object
     <code>{ "tree1": [...], "tree2": [...] }</code> with one key per tree.</li>
 </ul>
@@ -457,6 +458,43 @@
 
 &lt;!-- output="flat"     -&gt; [["/users/view",1,null], ["/reports/view",0,null], ...]
      output="sections" -&gt; { "users": [...], "reports": [...] } --&gt;</pre>
+
+<h3>branch-name="omit": paths without the tree name</h3>
+<p>Each tree normally contributes its <code>name</code> as the first path
+  segment. When a tree wraps a single root item of the same name &mdash; one
+  section of a permission set &mdash; that segment would appear twice
+  (<code>/contacts/contacts/employee</code>). With
+  <code>branch-name="omit"</code> on the group the paths start at the first
+  <code>&lt;cbt-item&gt;</code> instead:</p>
+
+<closure-checkbox-group id="branch-group" name="sections" branch-name="omit">
+  <closure-checkbox-tree name="contacts" label="Users and Roles" expanded>
+    <cbt-item name="contacts" label="Users and Roles">
+      <cbt-item name="employee" label="Employees"></cbt-item>
+      <cbt-item name="admin"    label="Admins"></cbt-item>
+    </cbt-item>
+  </closure-checkbox-tree>
+  <closure-checkbox-tree name="audit" label="Audit" expanded>
+    <cbt-item name="audit" label="Audit"></cbt-item>
+  </closure-checkbox-tree>
+</closure-checkbox-group>
+
+<pre id="out-branch">(tick a checkbox to see the group value)</pre>
+
+<pre>&lt;closure-checkbox-group name="sections" branch-name="omit"&gt;
+  &lt;closure-checkbox-tree name="contacts" label="Users and Roles" expanded&gt;
+    &lt;cbt-item name="contacts" label="Users and Roles"&gt;
+      &lt;cbt-item name="employee" label="Employees"&gt;&lt;/cbt-item&gt;
+      &lt;cbt-item name="admin"    label="Admins"&gt;&lt;/cbt-item&gt;
+    &lt;/cbt-item&gt;
+  &lt;/closure-checkbox-tree&gt;
+  &lt;closure-checkbox-tree name="audit" label="Audit" expanded&gt;
+    &lt;cbt-item name="audit" label="Audit"&gt;&lt;/cbt-item&gt;
+  &lt;/closure-checkbox-tree&gt;
+&lt;/closure-checkbox-group&gt;
+
+&lt;!-- branch-name="include" (default) -&gt; /contacts/contacts/employee, /audit/audit
+     branch-name="omit"              -&gt; /contacts/employee,          /audit --&gt;</pre>
 
 <!-- ===================================================================== -->
 <!-- 5. fingerprint-hands                                                  -->
@@ -576,6 +614,13 @@
   var outGroup = document.getElementById('out-group');
   group.addEventListener('change', function() {
     outGroup.textContent = group.value;
+  });
+
+  // --- 4. group with branch-name="omit": same, paths without the tree name -
+  var branchGroup = document.getElementById('branch-group');
+  var outBranch = document.getElementById('out-branch');
+  branchGroup.addEventListener('change', function() {
+    outBranch.textContent = branchGroup.value;
   });
 
   // --- 5. fingerprint-hands: .value on every finger-click -----------------

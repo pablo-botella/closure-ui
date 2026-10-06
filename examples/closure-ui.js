@@ -6700,9 +6700,10 @@ class CheckboxTree extends HTMLElement {
     var items = this.querySelectorAll(':scope > cbt-item');
     var self = this;
     // Paths include the tree's name (`/<treeName>/<item>/…`) — that's
-    // the prefix _loadFromSrc and the group's flat setValues filter by
+    // the prefix _loadFromSrc and the group's flat setValues filter by —
+    // unless branch-name="omit" leaves it out (`/<item>/…`)
     var treeName = this.getAttribute('name') || '';
-    var base = treeName ? '/' + treeName : '';
+    var base = (treeName && !this._isBranchNameOmitted()) ? '/' + treeName : '';
     items.forEach(function(item) {
       self._treeRoot.appendChild(self._buildNode(item, base));
     });
@@ -7083,10 +7084,34 @@ class CheckboxTree extends HTMLElement {
   }
 
   // ---
+  // send-only-active trims the emitted value to the nodes that are on. The
+  // tree's own attribute or its group's — either one turns it on.
   _isSendOnlyActive() {
     if (this.hasAttribute('send-only-active')) return true;
     var group = this.closest('closure-checkbox-group');
     return group && group.hasAttribute('send-only-active');
+  }
+
+  // ---
+  // branch-name="omit" keeps the tree's name out of its paths. The tree's
+  // own attribute wins; otherwise it is inherited from the group.
+  _isBranchNameOmitted() {
+    var v = this.getAttribute('branch-name');
+    if (v === null) {
+      var group = this.closest('closure-checkbox-group');
+      if (group) v = group.getAttribute('branch-name');
+    }
+    return v === 'omit';
+  }
+
+  // ---
+  // Prefix shared by every path of this tree, used to pick its entries out
+  // of a flat list. With the branch name omitted there is nothing to tell
+  // the trees apart, so the prefix matches everything and setValues keeps
+  // only the paths this tree actually has.
+  _pathPrefix() {
+    if (this._isBranchNameOmitted()) return '/';
+    return '/' + (this.getAttribute('name') || '') + '/';
   }
 
   // ---
@@ -7173,7 +7198,7 @@ class CheckboxTree extends HTMLElement {
     try {
       var data = JSON.parse(el.textContent);
       if (!Array.isArray(data)) return;
-      var prefix = '/' + (this.getAttribute('name') || '') + '/';
+      var prefix = this._pathPrefix();
       var subset = data.filter(function(entry) {
         return entry[0].indexOf(prefix) === 0;
       });
@@ -7406,7 +7431,7 @@ class CheckboxGroup extends HTMLElement {
       });
     } else if (Array.isArray(data)) {
       trees.forEach(function(tree) {
-        var prefix = '/' + (tree.getAttribute('name') || '') + '/';
+        var prefix = tree._pathPrefix();
         var subset = data.filter(function(entry) {
           return entry[0].indexOf(prefix) === 0;
         });

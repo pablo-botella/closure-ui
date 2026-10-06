@@ -2787,8 +2787,10 @@ Two visual modes:
 | Attribute | Description |
 |---|---|
 | `name="x"`              | tree name (used in paths and as the form field name) |
+| `branch-name="omit"`    | leave the tree name out of the paths (`/<item>/…` instead of `/<name>/<item>/…`); default `include`. Also inherited from the enclosing `<closure-checkbox-group>` |
 | `expanded`              | render the full tree inline instead of the collapsed pill |
 | `readonly`              | disable every checkbox in shadow DOM |
+| `send-only-active`      | emit only the nodes that are on: checked leaves and parents whose tree value is not `0`. Also inherited from the enclosing `<closure-checkbox-group>` |
 | `label-all="All"`       | label for the All state |
 | `label-none="None"`     | label for the None state |
 | `label-custom="Custom"` | label for the Custom state |
@@ -2809,7 +2811,7 @@ The form value is a minified JSON string with the shape:
 
 | Field | Meaning |
 |---|---|
-| `path` | leading-slash path through the tree, e.g. `/section/sub-1` |
+| `path` | leading-slash path through the tree, e.g. `/section/sub-1`; it starts with the tree `name` unless `branch-name="omit"` |
 | `v`    | leaf value — `0` (off) or non-zero (on); `null` for parents |
 | `vt`   | tree value — `0` (none), `1` (all), `2` (custom); `null` for leaves |
 
@@ -2823,7 +2825,7 @@ The form value is a minified JSON string with the shape:
 
 | Method | Description |
 |---|---|
-| `getValues()`     | array of `[path, v, vt]` for all nodes |
+| `getValues()`     | array of `[path, v, vt]` for all nodes (only the active ones with `send-only-active`) |
 | `setValues(arr)`  | restore from `[[path, v, vt], …]` |
 | `checkAll()`      | check every leaf |
 | `uncheckAll()`    | uncheck every leaf |
@@ -2867,6 +2869,23 @@ Fired on any leaf or parent state change.
 > **Note:** `setValues` ignores entries whose `path` doesn't exist in
 > the current tree. Useful when restoring data from a wider permission
 > set than is currently displayed.
+
+> **Note:** with `send-only-active` the value lists only what is on: a
+> leaf appears when it is checked (`[path, 1, null]`) and a parent when
+> its tree value is `1` (all) or `2` (custom). Unchecked leaves and
+> fully-off parents are left out, so an absent path means "off" and a
+> tree with nothing checked submits `[]`. It only shapes the output:
+> `src` and `setValues` take the same data either way. The attribute is
+> looked up each time the value is computed; toggling it at runtime
+> reaches the submitted form value on the next change.
+
+> **Note:** with `branch-name="omit"` the paths carry only the
+> `<cbt-item>` names: a tree whose single root item is `users` emits
+> `/users`, `/users/view`, … whatever the tree itself is called. Use it
+> when the server already owns a path scheme and the tree name is just
+> a label for the widget. The attribute is read once, when the tree is
+> built. See [`<closure-checkbox-group>`](#closure-checkbox-group) for a
+> side-by-side table of both forms.
 
 ---
 
@@ -2927,7 +2946,9 @@ selection state between them.
 | `name="x"`           | form field name |
 | `output="flat"`      | flat array (default) — every tree's leaves concatenated |
 | `output="sections"`  | object `{ treeName: [[path, v, vt], …] }` |
+| `branch-name="omit"` | child trees leave their own name out of the paths (`/<item>/…`); default `include` (`/<treeName>/<item>/…`) |
 | `readonly`           | propagates `readonly` to every child tree |
+| `send-only-active`   | child trees emit only the nodes that are on (checked leaves, parents not fully off) instead of every node |
 | `src="id"`           | id of an element whose `textContent` is parsed as JSON to seed initial values |
 | `summary="id"`       | id of a paired `<closure-summary>` to refresh on changes |
 
@@ -2943,7 +2964,40 @@ Same JSON serialisation as `<closure-checkbox-tree>` but combined:
 - **sections**: `{ "tree-1": [...], "tree-2": [...] }`
 
 In `flat` mode each path begins with `/<treeName>/…` so the server
-can still demultiplex.
+can still demultiplex. With `branch-name="omit"` that leading segment is
+dropped and the paths start at the first `<cbt-item>`; `sections` output
+stays keyed by tree name either way.
+
+### Paths and `branch-name`
+
+Every tree puts its own `name` in front of its paths. That keeps the trees
+of a flat payload apart, but when a tree wraps a single root item of the
+same name — the usual shape for one section of a permission set — the
+segment shows up twice. `branch-name="omit"` on the group leaves it out:
+
+```html
+<closure-checkbox-group name="privileges" branch-name="omit">
+  <closure-checkbox-tree name="contacts" label="Users and Roles">
+    <cbt-item name="contacts" label="Users and Roles">
+      <cbt-item name="employee" label="Employees"></cbt-item>
+      <cbt-item name="admin"    label="Admins"></cbt-item>
+    </cbt-item>
+  </closure-checkbox-tree>
+  <closure-checkbox-tree name="audit" label="Audit">
+    <cbt-item name="audit" label="Audit"></cbt-item>
+  </closure-checkbox-tree>
+</closure-checkbox-group>
+```
+
+| Node | `branch-name="include"` (default) | `branch-name="omit"` |
+|---|---|---|
+| section `contacts` | `/contacts/contacts`          | `/contacts` |
+| leaf `employee`    | `/contacts/contacts/employee` | `/contacts/employee` |
+| leaf `admin`       | `/contacts/contacts/admin`    | `/contacts/admin` |
+| section `audit`    | `/audit/audit`                | `/audit` |
+
+Seed data (`src`, `setValues(...)`, `.value = …`) uses the same paths the
+group emits, so with `omit` it carries no tree-name segment either.
 
 ## Properties
 
@@ -2992,7 +3046,17 @@ can still demultiplex.
 
 > **Note:** in `flat` mode, `setValues(data)` filters entries by their
 > leading `/<treeName>/` so each tree gets only its own subset. Cross-tree
-> noise is silently ignored.
+> noise is silently ignored. With `branch-name="omit"` there is no such
+> prefix: every tree is handed the whole list and keeps the paths it has.
+
+> **Note:** `branch-name` is read once, when each tree is built. A tree
+> may also set it for itself, overriding the group.
+
+> **Note:** `send-only-active` shrinks the payload to what is on, so an
+> absent path means "off"; with nothing checked the group submits `[]`
+> (`flat`) or an object of empty arrays (`sections`). It does not change
+> what `src` / `setValues` accept. See
+> [`<closure-checkbox-tree>`](#closure-checkbox-tree) for the exact rule.
 
 > **Note:** `src` is read once on connect. To re-seed later, call
 > `setValues(...)` with the new payload.
