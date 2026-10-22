@@ -80,6 +80,7 @@ URL resolution order: per-role `<template-url>` (dyn first, then static)
 | `name="x"`           | hidden input name |
 | `value="x"`          | static value |
 | `dyn-value-id="id"`  | read value from another element at submit time |
+| `enable-macro="ss,ls"` | expand the storage macros of `value` when the field is packaged: `<ss:key>` (sessionStorage), `<ls:key>` (localStorage); each source enabled by its token (shared `closureExpandMacros`, the same as `<signal-event>`). A key missing from the storage drops the field with a `console.warn`; the request goes on without it |
 | `switch="<id> == v"` | guard |
 
 ### `<template-loading>` — placeholder while in-flight
@@ -116,6 +117,29 @@ mark or clean the closure's dirty templates without code.
 | Method | Description |
 |---|---|
 | `execute(role, forms, submittedForm, btnData)` | invoked by `<target-closure>` for the firing button |
+
+## Events (handled)
+
+| Event | Detail | Effect |
+|---|---|---|
+| `execute-template` | `{ "ct-role"?: "x", …fields }` | runs the template as a button would: `ct-role` (default `""`) picks the role, every other key of `detail` is a field of the request (section-less, like a button's `data-*`); the forms come from the enclosing `<target-closure>` (`_collectForms`). Dispatched **at the template** (it needs an `id`) by any `CustomEvent` source. It does not bubble: the template stops it, and ignores one that reaches it from a descendant |
+
+The event twin of the `execute-template` response directive: that one runs a template from a server
+response (by closure and name, no fields); this one runs it from the page, with fields. The natural
+emitter is `<signal-event>`:
+
+```html
+<target-closure>
+  <closure-template id="screen" name="screen" send-behavior="fetch">
+    <template-url url="/screen/" method="POST" response-target-id="body"></template-url>
+    <template-field name="sid" value="<ss:sid>" enable-macro="ss"></template-field>
+  </closure-template>
+  <div id="body"></div>
+</target-closure>
+
+<!-- written by the server after the closure: runs the template on load, with screen=home as a field -->
+<signal-event name="execute-template" target-id="screen" data-screen="home"></signal-event>
+```
 
 ## Behaviour
 
@@ -168,7 +192,34 @@ mark or clean the closure's dirty templates without code.
 %%>*/
 
 class ClosureTemplate extends HTMLElement {
-  connectedCallback() { this.style.display = 'none'; }
+  connectedCallback() {
+    this.style.display = 'none';
+    // `execute-template` dispatched at this element runs it like a button would
+    // (the event twin of the ClosureResponse directive of the same name)
+    if (!this._boundExecuteEvent) {
+      this._boundExecuteEvent = this._onExecuteEvent.bind(this);
+      this.addEventListener('execute-template', this._boundExecuteEvent);
+    }
+  }
+
+  _onExecuteEvent(e) {
+    // addressed to this template only: it never bubbles further, and one coming
+    // up from a descendant is not ours
+    if (e.target !== this) return;
+    e.stopPropagation();
+    var detail = (e && e.detail) || {};
+    var role = '';
+    var fields = {};
+    for (var k in detail) {
+      if (!Object.prototype.hasOwnProperty.call(detail, k)) continue;
+      if (k === 'ct-role') role = String(detail[k] || '');
+      else fields[k] = detail[k];
+    }
+    var closure = this.closest('target-closure');
+    var forms = closure && closure._collectForms ? closure._collectForms() : [];
+    var btnData = { ctRole: role, closureTemplate: this.getAttribute('name') || '', sections: { '': fields } };
+    this.execute(role, forms, null, btnData);
+  }
 
   execute(role, forms, submittedForm, btnData) {
     var sendBehavior = this._resolveSendBehavior(role);
@@ -378,6 +429,16 @@ class ClosureTemplate extends HTMLElement {
       var r = all[i].getAttribute('ct-role');
       var name = all[i].getAttribute('name') || '';
       var value = all[i].getAttribute('value') || '';
+      if (all[i].hasAttribute('enable-macro')) {
+        // <ss:key> / <ls:key> in value; a missing key drops this field, the request goes on
+        try {
+          value = closureExpandMacros(value, all[i].getAttribute('enable-macro'), false);
+        } catch (err) {
+          if (!(err instanceof ClosureMacroError)) throw err;
+          console.warn('closure-template: template-field "' + name + '" dropped: ' + err.message);
+          continue;
+        }
+      }
       var item = { name: name, value: value };
       if (r === '*') { starItems.push(item); }
       else if (r && r === role) { roleItems.push(item); }

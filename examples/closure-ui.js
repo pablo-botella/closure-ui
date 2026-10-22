@@ -69,6 +69,32 @@ function closureFreeSubmit(el, url, defaultMethod, opts) {
                  // in <body> on a download / new-tab action
 }
 
+// ClosureMacroError: a <ss:key> / <ls:key> macro named a key that is not in the
+// storage. Callers decide what "nothing runs" means for them (skip the field,
+// skip the whole signal...) and log it.
+class ClosureMacroError extends Error {}
+
+// closureExpandMacros(value, enabled, isUrl): expands the storage macros of an
+// attribute value — <ss:key> reads sessionStorage, <ls:key> localStorage — for
+// the sources listed in `enabled` (the element's enable-macro="ss,ls", a
+// comma-separated string or an array); a source not enabled leaves its macro
+// as literal text. In a url the value is percent-encoded unless the macro
+// says `:raw` (<ss:next:raw>). A missing key throws ClosureMacroError. Shared
+// by <signal-event> and <template-field enable-macro>.
+function closureExpandMacros(value, enabled, isUrl) {
+  if (value == null) return value;
+  var list = Array.isArray(enabled) ? enabled
+    : String(enabled || '').split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+  if (list.length === 0) return value;
+  return value.replace(/<(ss|ls):([^<>:]+)(:raw)?>/g, function(whole, src, key, raw) {
+    if (list.indexOf(src) < 0) return whole;
+    var storage = src === 'ss' ? window.sessionStorage : window.localStorage;
+    var v = storage.getItem(key);
+    if (v === null) throw new ClosureMacroError('macro ' + whole + ': no such key in ' + src);
+    return (isUrl && !raw) ? encodeURIComponent(v) : v;
+  });
+}
+
 function applyWidthRange(el) {
   var wr = el.getAttribute('wr');
   if (!wr) return;
@@ -88,7 +114,9 @@ function applyWidthRange(el) {
 customElements.define('signal-event', class extends HTMLElement {
   connectedCallback() {
     this.style.display = 'none';
-    if (!this.getAttribute('name')) { this.remove(); return; }
+    // A bare node — neither an event to dispatch nor a directive to run — is noise
+    // (a condition alone, with nothing to run, is noise too).
+    if (!this.getAttribute('name') && !this.getAttribute('type')) { this.remove(); return; }
     // A `no-cancel` timer survives disconnect (see disconnectedCallback). If the
     // node is reconnected while that timer is still pending, don't arm a second
     // one — the original still fires (and self-removes); a duplicate would
@@ -115,21 +143,146 @@ customElements.define('signal-event', class extends HTMLElement {
 
   _fire() {
     this._timer = null;
-    const name = this.getAttribute('name');
-    const detail = {};
-    for (const attr of this.attributes) {
-      if (attr.name.startsWith('data-')) {
-        detail[attr.name.slice(5)] = attr.value;
+    // if-ss / if-not-ss / if-ls / if-not-ls: a condition that fails means a silent no-op
+    if (!this._conditions()) { this.remove(); return; }
+    let detail;
+    try {
+      detail = this._dataPairs();
+    } catch (err) {
+      // a macro pointed at a missing key: nothing runs (see _macro)
+      console.warn('signal-event: ' + err.message);
+      this.remove();
+      return;
+    }
+    // The directive runs first, then the event (if any): a listener may rely on
+    // what the directive just stored.
+    const type = this.getAttribute('type');
+    if (type) {
+      try {
+        this._runDirective(type, detail);
+      } catch (err) {
+        if (err instanceof ClosureMacroError) {
+          console.warn('signal-event: ' + err.message);
+          this.remove();
+          return;
+        }
+        throw err;
       }
     }
-    const target = this._resolveTarget();
-    if (target) {
-      target.dispatchEvent(new CustomEvent(name, {
-        detail,
-        bubbles: this.hasAttribute('bubbles')
-      }));
+    const name = this.getAttribute('name');
+    if (name) {
+      const target = this._resolveTarget();
+      if (target) {
+        target.dispatchEvent(new CustomEvent(name, {
+          detail,
+          bubbles: this.hasAttribute('bubbles')
+        }));
+      }
     }
     this.remove();
+  }
+
+  // Every data-* attribute, prefix stripped, kebab-case kept — the event detail
+  // and the payload of the storage `set` directives.
+  _dataPairs() {
+    const pairs = {};
+    for (const attr of this.attributes) {
+      if (attr.name.startsWith('data-')) pairs[attr.name.slice(5)] = this._macro(attr.value, false);
+    }
+    return pairs;
+  }
+
+  // Every key of `if-ss` / `if-ls` must exist in its storage, none of `if-not-ss` /
+  // `if-not-ls` may. Evaluated when the signal fires (after any delay). A blocked
+  // storage counts as "no key".
+  _conditions() {
+    const check = (attr, storage, want) => {
+      for (const key of this._list(this.getAttribute(attr))) {
+        let has = false;
+        try { has = storage.getItem(key) !== null; } catch (err) { has = false; }
+        if (has !== want) return false;
+      }
+      return true;
+    };
+    return check('if-ss', window.sessionStorage, true) && check('if-not-ss', window.sessionStorage, false) &&
+      check('if-ls', window.localStorage, true) && check('if-not-ls', window.localStorage, false);
+  }
+
+  // The attribute, with its macros expanded when their source is enabled
+  // (`enable-macro="ss,ls"`): <ss:key> reads sessionStorage, <ls:key>
+  // localStorage. In a url the value is percent-encoded unless the macro says
+  // `:raw`. A missing key throws ClosureMacroError: the caller logs and runs nothing.
+  _attr(name, isUrl) {
+    return this._macro(this.getAttribute(name), isUrl);
+  }
+
+  _macro(value, isUrl) {
+    // the shared expansion (closure_helper_functions.js); ClosureMacroError on a missing key
+    return closureExpandMacros(value, this.getAttribute('enable-macro'), isUrl);
+  }
+
+  // The directives: browser storage, mirroring ClosureResponse's storage items
+  // but runnable anywhere (the initial document included). Storage access can
+  // throw (private window, blocked site data): log and carry on, the node still
+  // removes itself.
+  _runDirective(type, pairs) {
+    if (type === 'redirect') {
+      const url = this._attr('url', true);
+      if (!url) {
+        console.warn('signal-event: type "redirect" needs a url');
+        return;
+      }
+      if (this.getAttribute('history') === 'replace') window.location.replace(url);
+      else window.location.assign(url);
+      return;
+    }
+    const m = /^(session|local)-storage-(set|clear|clear-wild)$/.exec(type);
+    if (!m) {
+      console.warn('signal-event: unknown type "' + type + '"');
+      return;
+    }
+    try {
+      const storage = m[1] === 'session' ? window.sessionStorage : window.localStorage;
+      switch (m[2]) {
+        case 'set':
+          for (const k in pairs) storage.setItem(k, pairs[k]);
+          break;
+        case 'clear': {
+          // no key, nothing removed: emptying a storage is clear-wild pattern="*", on purpose
+          const keys = this._list(this._attr('key', false));
+          if (keys.length === 0) {
+            console.warn('signal-event: type "' + type + '" needs a key (to empty the storage use ' +
+              m[1] + '-storage-clear-wild pattern="*")');
+            break;
+          }
+          keys.forEach(k => storage.removeItem(k));
+          break;
+        }
+        case 'clear-wild': {
+          const res = this._list(this._attr('pattern', false)).map(p =>
+            new RegExp('^' + p.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.') + '$'));
+          if (res.length === 0) {
+            console.warn('signal-event: type "' + type + '" needs a pattern');
+            break;
+          }
+          const toRemove = [];
+          for (let i = 0; i < storage.length; i++) {
+            const k = storage.key(i);
+            if (res.some(re => re.test(k))) toRemove.push(k);
+          }
+          toRemove.forEach(k => storage.removeItem(k));
+          break;
+        }
+      }
+    } catch (err) {
+      if (err instanceof ClosureMacroError) throw err;
+      console.warn('signal-event: type "' + type + '" failed: ' + err);
+    }
+  }
+
+  // A comma-separated attribute as a trimmed list, blanks dropped.
+  _list(value) {
+    return (value || '').split(',').map(s => s.trim()).filter(s => s !== '');
   }
 
   // target-id (resolved at fire time) dispatches on that element; a missing
@@ -932,10 +1085,17 @@ var ClosureResponse = {
     case 'execute-template':
       var tmplName = item.getAttribute('closure-template') || '';
       var role = item.getAttribute('ct-role') || '';
+      // data-* of the item travel as fields, like a button's (and like the
+      // `execute-template` event a <signal-event> dispatches at a template)
+      var xFields = {};
+      Array.prototype.forEach.call(item.attributes, function(a) {
+        if (a.name.indexOf('data-') === 0) xFields[a.name.slice(5)] = a.value;
+      });
+      var xData = { ctRole: role, closureTemplate: tmplName, sections: { '': xFields } };
       targets.forEach(function(el) {
         if (el._findTemplate) {
           var tmpl = el._findTemplate(tmplName);
-          if (tmpl) tmpl.execute(role, el._collectForms());
+          if (tmpl) tmpl.execute(role, el._collectForms(), null, xData);
         }
       });
       break;
@@ -1385,7 +1545,34 @@ customElements.define('target-closure', TargetClosure);
 
 
 class ClosureTemplate extends HTMLElement {
-  connectedCallback() { this.style.display = 'none'; }
+  connectedCallback() {
+    this.style.display = 'none';
+    // `execute-template` dispatched at this element runs it like a button would
+    // (the event twin of the ClosureResponse directive of the same name)
+    if (!this._boundExecuteEvent) {
+      this._boundExecuteEvent = this._onExecuteEvent.bind(this);
+      this.addEventListener('execute-template', this._boundExecuteEvent);
+    }
+  }
+
+  _onExecuteEvent(e) {
+    // addressed to this template only: it never bubbles further, and one coming
+    // up from a descendant is not ours
+    if (e.target !== this) return;
+    e.stopPropagation();
+    var detail = (e && e.detail) || {};
+    var role = '';
+    var fields = {};
+    for (var k in detail) {
+      if (!Object.prototype.hasOwnProperty.call(detail, k)) continue;
+      if (k === 'ct-role') role = String(detail[k] || '');
+      else fields[k] = detail[k];
+    }
+    var closure = this.closest('target-closure');
+    var forms = closure && closure._collectForms ? closure._collectForms() : [];
+    var btnData = { ctRole: role, closureTemplate: this.getAttribute('name') || '', sections: { '': fields } };
+    this.execute(role, forms, null, btnData);
+  }
 
   execute(role, forms, submittedForm, btnData) {
     var sendBehavior = this._resolveSendBehavior(role);
@@ -1595,6 +1782,16 @@ class ClosureTemplate extends HTMLElement {
       var r = all[i].getAttribute('ct-role');
       var name = all[i].getAttribute('name') || '';
       var value = all[i].getAttribute('value') || '';
+      if (all[i].hasAttribute('enable-macro')) {
+        // <ss:key> / <ls:key> in value; a missing key drops this field, the request goes on
+        try {
+          value = closureExpandMacros(value, all[i].getAttribute('enable-macro'), false);
+        } catch (err) {
+          if (!(err instanceof ClosureMacroError)) throw err;
+          console.warn('closure-template: template-field "' + name + '" dropped: ' + err.message);
+          continue;
+        }
+      }
       var item = { name: name, value: value };
       if (r === '*') { starItems.push(item); }
       else if (r && r === role) { roleItems.push(item); }

@@ -162,6 +162,32 @@ function closureFreeSubmit(el, url, defaultMethod, opts) {
                  // in <body> on a download / new-tab action
 }
 
+// ClosureMacroError: a <ss:key> / <ls:key> macro named a key that is not in the
+// storage. Callers decide what "nothing runs" means for them (skip the field,
+// skip the whole signal...) and log it.
+class ClosureMacroError extends Error {}
+
+// closureExpandMacros(value, enabled, isUrl): expands the storage macros of an
+// attribute value — <ss:key> reads sessionStorage, <ls:key> localStorage — for
+// the sources listed in `enabled` (the element's enable-macro="ss,ls", a
+// comma-separated string or an array); a source not enabled leaves its macro
+// as literal text. In a url the value is percent-encoded unless the macro
+// says `:raw` (<ss:next:raw>). A missing key throws ClosureMacroError. Shared
+// by <signal-event> and <template-field enable-macro>.
+function closureExpandMacros(value, enabled, isUrl) {
+  if (value == null) return value;
+  var list = Array.isArray(enabled) ? enabled
+    : String(enabled || '').split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+  if (list.length === 0) return value;
+  return value.replace(/<(ss|ls):([^<>:]+)(:raw)?>/g, function(whole, src, key, raw) {
+    if (list.indexOf(src) < 0) return whole;
+    var storage = src === 'ss' ? window.sessionStorage : window.localStorage;
+    var v = storage.getItem(key);
+    if (v === null) throw new ClosureMacroError('macro ' + whole + ': no such key in ' + src);
+    return (isUrl && !raw) ? encodeURIComponent(v) : v;
+  });
+}
+
 function applyWidthRange(el) {
   var wr = el.getAttribute('wr');
   if (!wr) return;

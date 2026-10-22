@@ -173,7 +173,9 @@ what happens next.
 ### Closure
 `clean-dirty` (`templates="*"` or `"a,b"`),
 `mark-dirty`,
-`execute-template` (`closure-template`, `ct-role`).
+`execute-template` (`closure-template`, `ct-role`; every `data-*` of the item is sent as a field of the
+request, section-less, like a button's `data-*` — the directive twin of the `execute-template` event a
+`<signal-event>` dispatches at a `<closure-template>`).
 
 ## Behaviour
 
@@ -515,10 +517,17 @@ var ClosureResponse = {
     case 'execute-template':
       var tmplName = item.getAttribute('closure-template') || '';
       var role = item.getAttribute('ct-role') || '';
+      // data-* of the item travel as fields, like a button's (and like the
+      // `execute-template` event a <signal-event> dispatches at a template)
+      var xFields = {};
+      Array.prototype.forEach.call(item.attributes, function(a) {
+        if (a.name.indexOf('data-') === 0) xFields[a.name.slice(5)] = a.value;
+      });
+      var xData = { ctRole: role, closureTemplate: tmplName, sections: { '': xFields } };
       targets.forEach(function(el) {
         if (el._findTemplate) {
           var tmpl = el._findTemplate(tmplName);
-          if (tmpl) tmpl.execute(role, el._collectForms());
+          if (tmpl) tmpl.execute(role, el._collectForms(), null, xData);
         }
       });
       break;

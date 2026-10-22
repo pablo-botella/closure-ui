@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>closure-ui — signal-event</title>
+</head>
+<body>
+<h1>closure-ui — <code>&lt;signal-event&gt;</code></h1>
+<p>Demo of the one-shot signal element: the plain event dispatch, the storage
+  directives (<code>type="session-storage-set"</code>, <code>-clear</code>,
+  <code>-clear-wild</code> and their <code>local-storage-</code> twins), the
+  <code>redirect</code> directive, the <code>&lt;ss:key&gt;</code> /
+  <code>&lt;ls:key&gt;</code> macros and the <code>if-ss</code> /
+  <code>if-not-ss</code> conditions.</p>
+<p>Every button below <strong>injects</strong> a <code>&lt;signal-event&gt;</code>
+  into the page (the markup it injects is printed next to it) — the element
+  fires once and removes itself, exactly as it would when written by the
+  server. The page needs no server: <code>sessionStorage</code> works from
+  <code>file://</code> too. Open the browser console as well: unknown types and
+  missing macro keys log a <code>console.warn</code>.</p>
+
+<!-- ============ 0. live state ============ -->
+<h2>0. Live state</h2>
+<p>Current <code>sessionStorage</code> and the signals received by this page:</p>
+<pre id="ss-dump" style="background:#f4f4f4;padding:8px">(empty)</pre>
+<pre id="log" style="background:#f4f4f4;padding:8px;min-height:3em">(no events yet)</pre>
+<p>Location: <code id="loc"></code></p>
+
+<!-- ============ 1. events ============ -->
+<h2>1. Plain event (the original behaviour)</h2>
+<p>A named <code>CustomEvent</code> dispatched on <code>document</code>, every
+  <code>data-*</code> in <code>event.detail</code>; <code>delay</code> makes it
+  a timer; <code>target-id</code> aims one element.</p>
+<button data-inject='<signal-event name="soup-ready" data-token="carrot" data-potato-count="3"></signal-event>'>dispatch now</button>
+<button data-inject='<signal-event name="soup-ready" data-token="celery" delay="2000"></signal-event>'>dispatch in 2 s</button>
+<button data-inject='<signal-event name="soup-ready" target-id="log" bubbles data-token="leek"></signal-event>'>dispatch on #log (bubbles)</button>
+
+<!-- ============ 2. storage set ============ -->
+<h2>2. <code>type="session-storage-set"</code></h2>
+<p>Every <code>data-*</code> pair is written to the storage (prefix stripped,
+  kebab-case kept). The same element may also carry a <code>name</code>: the
+  directive runs first, then the event.</p>
+<button data-inject='<signal-event type="session-storage-set" data-sid="tomato-soup-42" data-onion-count="1"></signal-event>'>set sid + onion-count</button>
+<button data-inject='<signal-event type="session-storage-set" name="soup-ready" data-soup_flavour="pumpkin"></signal-event>'>set soup_flavour and also dispatch</button>
+<button data-inject='<signal-event type="local-storage-set" data-lettuce="hello"></signal-event>'>local-storage-set lettuce</button>
+
+<!-- ============ 3. storage clear ============ -->
+<h2>3. <code>type="session-storage-clear"</code> and <code>-clear-wild</code></h2>
+<p><code>key="a,b"</code> removes those keys; without <code>key</code> nothing
+  is removed (a warning). <code>-clear-wild</code> removes the keys matching the
+  <code>pattern</code> globs (<code>*</code>, <code>?</code>, anchored);
+  <code>pattern="*"</code> is the deliberate way to empty a storage.</p>
+<button data-inject='<signal-event type="session-storage-clear" key="onion-count"></signal-event>'>clear onion-count</button>
+<button data-inject='<signal-event type="session-storage-clear-wild" pattern="soup_*"></signal-event>'>clear-wild soup_*</button>
+<button data-inject='<signal-event type="session-storage-clear-wild" pattern="*"></signal-event>'>clear-wild * (everything, session)</button>
+<button data-inject='<signal-event type="session-storage-clear"></signal-event>'>clear without key (warns, removes nothing)</button>
+<button data-inject='<signal-event type="local-storage-clear" key="lettuce"></signal-event>'>local-storage-clear lettuce</button>
+<button data-inject='<signal-event type="no-such-type"></signal-event>'>unknown type (warns)</button>
+
+<!-- ============ 4. macros ============ -->
+<h2>4. Macros <code>&lt;ss:key&gt;</code> / <code>&lt;ls:key&gt;</code></h2>
+<p>Only with <code>enable-macro="ss,ls"</code>; a missing key logs a warning
+  and nothing runs. Set <code>sid</code> in section 2 first.</p>
+<button data-inject='<signal-event name="soup-ready" enable-macro="ss" data-sid="<ss:sid>" data-parsley="<ls:lettuce>"></signal-event>'>event with data-sid="&lt;ss:sid&gt;" (ls not enabled: literal)</button>
+<button data-inject='<signal-event name="soup-ready" enable-macro="ss,ls" data-sid="<ss:sid>" data-basil="<ls:lettuce>"></signal-event>'>both sources enabled</button>
+<button data-inject='<signal-event name="soup-ready" data-sid="<ss:sid>"></signal-event>'>no enable-macro: stays literal</button>
+<button data-inject='<signal-event name="soup-ready" enable-macro="ss" data-garlic="<ss:no-such-key>"></signal-event>'>missing key: warns, nothing runs</button>
+
+<!-- ============ 5. conditions ============ -->
+<h2>5. Conditions <code>if-ss</code> / <code>if-not-ss</code></h2>
+<p>Evaluated when the signal fires; a failed condition is a silent no-op.</p>
+<button data-inject='<signal-event name="soup-ready" if-ss="sid" data-note="broth is on"></signal-event>'>dispatch only if sid exists</button>
+<button data-inject='<signal-event name="soup-ready" if-not-ss="sid" data-note="no broth"></signal-event>'>dispatch only if sid is absent</button>
+<button data-inject='<signal-event name="soup-ready" if-ss="sid,onion-count" data-note="full pot"></signal-event>'>only if sid AND onion-count exist</button>
+
+<!-- ============ 6. redirect ============ -->
+<h2>6. <code>type="redirect"</code></h2>
+<p>Navigates to <code>url</code>. <code>history="replace"</code> substitutes the
+  current history entry (the page that carried the signal is gone from the
+  history); the default <code>push</code> keeps it. With macros the url can
+  carry a storage value, percent-encoded. Both buttons reload this page with a
+  query string — check the <em>Location</em> line and the back button.</p>
+<button data-inject='<signal-event type="redirect" history="replace" enable-macro="ss" url="signal-event.html?sid=<ss:sid>&amp;via=replace"></signal-event>'>redirect replace with ?sid=&lt;ss:sid&gt; (needs sid)</button>
+<button data-inject='<signal-event type="redirect" url="signal-event.html?via=push"></signal-event>'>redirect push (back returns here)</button>
+<button data-inject='<signal-event type="redirect" history="replace" if-not-ss="sid" url="signal-event.html?via=no-sid"></signal-event>'>redirect only if there is no sid</button>
+
+<!-- ============ 7. execute-template ============ -->
+<h2>7. <code>name="execute-template"</code> → a <code>&lt;closure-template&gt;</code></h2>
+<p>A signal dispatched <strong>at a template</strong> (its <code>id</code>) runs it as a button
+  would: every <code>data-*</code> travels as a field, <code>data-ct-role</code> picks the role, the
+  forms come from the enclosing <code>&lt;target-closure&gt;</code>. The template below posts to
+  <code>/api/soup</code> (so this section needs the demo server:
+  <code>examples/server.exe</code>, then <code>http://localhost:8099/signal-event.html</code>);
+  the server answers a <code>&lt;closure-response sections&gt;</code> that fills the three slots and,
+  for the starter, chains the main course with the <em>directive</em> twin,
+  <code>&lt;response-item type="execute-template" … data-course="main"&gt;</code>. The
+  <code>sid</code> field is a <code>&lt;template-field enable-macro="ss"&gt;</code>: set it in
+  section 2 first, or watch the console warn and the request go without it.</p>
+
+<target-closure id="soup-closure" style="display:block;border:1px solid #ccc;padding:8px">
+  <closure-template id="soup" name="soup" send-behavior="fetch" parse="closure-response">
+    <template-url url="/api/soup" method="POST"></template-url>
+    <template-field name="sid" value="<ss:sid>" enable-macro="ss"></template-field>
+    <template-field name="table" value="7"></template-field>
+  </closure-template>
+  <div id="soup-menu" style="font-weight:bold">(menu slot)</div>
+  <div id="soup-body">(body slot)</div>
+  <div id="soup-warnings" style="color:#a60">(warnings slot)</div>
+</target-closure>
+<p></p>
+<button data-inject='<signal-event name="execute-template" target-id="soup" data-course="starter"></signal-event>'>run the template: starter (then main, by directive)</button>
+<button data-inject='<signal-event name="execute-template" target-id="soup" data-course="dessert" data-portion="1"></signal-event>'>run the template: dessert</button>
+<button data-inject='<signal-event name="execute-template" target-id="soup" delay="1500" data-course="dessert"></signal-event>'>dessert in 1.5 s</button>
+
+<!-- ============ 8. what the entry page of an app looks like ============ -->
+<h2>8. The pattern: answer to an entry POST</h2>
+<p>The server answers an entry POST (a login, a hand-off from another site) with a page that stores the session id and
+  sends the browser, without a trace in the history, to the first screen:</p>
+<pre style="background:#f4f4f4;padding:8px">&lt;signal-event type="session-storage-set" data-sid="tomato-soup-42"&gt;&lt;/signal-event&gt;
+&lt;signal-event type="redirect" history="replace" enable-macro="ss"
+              url="/kitchen/?sid=&lt;ss:sid&gt;"&gt;&lt;/signal-event&gt;</pre>
+
+<script src="closure-ui.js"></script>
+<script>
+  (function() {
+    var log = document.getElementById('log');
+    var dump = document.getElementById('ss-dump');
+    document.getElementById('loc').textContent = location.pathname.split('/').pop() + location.search;
+
+    function refresh() {
+      var lines = [];
+      for (var i = 0; i < sessionStorage.length; i++) {
+        var k = sessionStorage.key(i);
+        lines.push('session  ' + k + ' = ' + JSON.stringify(sessionStorage.getItem(k)));
+      }
+      for (var j = 0; j < localStorage.length; j++) {
+        var lk = localStorage.key(j);
+        lines.push('local    ' + lk + ' = ' + JSON.stringify(localStorage.getItem(lk)));
+      }
+      dump.textContent = lines.length ? lines.join('\n') : '(empty)';
+    }
+
+    function note(text) {
+      if (log.textContent === '(no events yet)') log.textContent = '';
+      log.textContent += new Date().toLocaleTimeString() + '  ' + text + '\n';
+    }
+
+    // the listener the signals of this page talk to (registered before any signal lands)
+    document.addEventListener('soup-ready', function(e) {
+      note('soup-ready on ' + (e.target === document ? 'document' : '#' + e.target.id) +
+        ' detail=' + JSON.stringify(e.detail));
+      refresh();
+    });
+
+    // every button injects the markup of its data-inject attribute and shows it
+    Array.prototype.forEach.call(document.querySelectorAll('button[data-inject]'), function(btn) {
+      var code = document.createElement('code');
+      code.textContent = btn.getAttribute('data-inject');
+      code.style.cssText = 'display:block;margin:2px 0 10px;color:#555;font-size:12px';
+      btn.parentNode.insertBefore(code, btn.nextSibling);
+      btn.addEventListener('click', function() {
+        var holder = document.createElement('div');
+        holder.innerHTML = btn.getAttribute('data-inject');
+        document.body.appendChild(holder);   // connect → the signal fires and removes itself
+        note('injected ' + btn.getAttribute('data-inject').replace(/></g, '>\n<').split('\n')[0]);
+        setTimeout(refresh, 50);
+        setTimeout(function() { holder.remove(); refresh(); }, 2500);
+      });
+    });
+
+    refresh();
+  })();
+</script>
+</body>
+</html>

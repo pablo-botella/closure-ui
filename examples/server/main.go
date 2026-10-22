@@ -3,16 +3,20 @@
 // It serves the examples directory statically and exposes a couple of JSON
 // endpoints so the `grid-dynamic.html` demo can exercise the data grid's
 // dynamic mode (server-side pagination + filtering), which a file:// page
-// cannot do because it has no backend to fetch from.
+// cannot do because it has no backend to fetch from; and a POST endpoint,
+// /api/soup, that answers a <closure-response> fragment for the
+// `signal-event.html` demo of the execute-template event and directive.
 //
 //	cd examples/server
 //	go run .
 //	# open http://localhost:8099/grid-dynamic.html
+//	# open http://localhost:8099/signal-event.html
 package main
 
 import (
 	"encoding/json"
 	"flag"
+	"html"
 	"log"
 	"math/rand"
 	"net/http"
@@ -128,6 +132,61 @@ func peopleHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// soupHandler answers the signal-event demo: a <closure-response sections> that
+// fills the page's three slots with what was posted (the fields of the
+// execute-template event or directive, the template-field sid) and, for the
+// starter course, chains the main course through an execute-template directive
+// carrying its own data-* — the directive twin of the event.
+func soupHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	course := r.PostFormValue("course")
+	if course == "" {
+		course = "starter"
+	}
+	var fields strings.Builder
+	for k, vs := range r.PostForm {
+		for _, v := range vs {
+			fields.WriteString("<li><code>" + html.EscapeString(k) + "</code> = " + html.EscapeString(v) + "</li>")
+		}
+	}
+	menus := map[string]string{
+		"starter": "🥣 Starter · main · dessert",
+		"main":    "starter · 🍲 Main · dessert",
+		"dessert": "starter · main · 🍮 Dessert",
+	}
+	menu := menus[course]
+	if menu == "" {
+		menu = "🍴 " + html.EscapeString(course)
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	var b strings.Builder
+	b.WriteString("<closure-response sections>\n")
+	b.WriteString(`  <closure-response-section target-id="soup-menu">` + menu + "</closure-response-section>\n")
+	b.WriteString(`  <closure-response-section target-id="soup-body"><p>The server received, from the ` +
+		html.EscapeString(course) + ` course:</p><ul>` + fields.String() + "</ul></closure-response-section>\n")
+	switch course {
+	case "starter":
+		b.WriteString(`  <closure-response-section target-id="soup-warnings">Starter served; the main course follows by directive…</closure-response-section>` + "\n")
+		// the directive twin: run the same template again, with fields of its own
+		b.WriteString(`  <response-item type="execute-template" target-id="soup-closure" closure-template="soup" data-course="main" data-portion="2"></response-item>` + "\n")
+	case "main":
+		b.WriteString(`  <closure-response-section target-id="soup-warnings">Main course served (portion ` +
+			html.EscapeString(r.PostFormValue("portion")) + `). Dessert is yours: press the button.</closure-response-section>` + "\n")
+	default:
+		b.WriteString(`  <closure-response-section target-id="soup-warnings"></closure-response-section>` + "\n")
+	}
+	b.WriteString("</closure-response>\n")
+	w.Write([]byte(b.String()))
+}
+
 func main() {
 	rows := flag.Int("rows", 0, "serve N random rows in memory instead of data/people.json (e.g. -rows 50000)")
 	flag.Parse()
@@ -140,6 +199,7 @@ func main() {
 	root := baseDir()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/people", peopleHandler)
+	mux.HandleFunc("/api/soup", soupHandler)
 	mux.Handle("/", staticHandler(root))
 
 	log.Printf("closure-ui examples on http://%s  (serving %s)", addr, root)
