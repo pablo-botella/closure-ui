@@ -5,12 +5,15 @@
 // dynamic mode (server-side pagination + filtering), which a file:// page
 // cannot do because it has no backend to fetch from; and a POST endpoint,
 // /api/soup, that answers a <closure-response> fragment for the
-// `signal-event.html` demo of the execute-template event and directive.
+// `signal-event.html` demo of the execute-template event and directive; and
+// another, /api/kitchen/pick, that answers the posted fields as a plain HTML
+// fragment for the <closure-select> demo of `buttons-actions.html`.
 //
 //	cd examples/server
 //	go run .
 //	# open http://localhost:8099/grid-dynamic.html
 //	# open http://localhost:8099/signal-event.html
+//	# open http://localhost:8099/buttons-actions.html
 package main
 
 import (
@@ -24,6 +27,7 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -187,6 +191,38 @@ func soupHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(b.String()))
 }
 
+// kitchenPickHandler answers the <closure-select> demo of buttons-actions.html:
+// a plain HTML fragment (the template has no parse, it goes as is into its
+// response-target-id) listing the posted fields, so the page itself shows the
+// payload a change of the select sends: the element's data-*, the chosen
+// option's data-* and the value under the select's name.
+func kitchenPickHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	keys := make([]string, 0, len(r.PostForm))
+	for k := range r.PostForm {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	b.WriteString("<p>The server received:</p><ul>")
+	for _, k := range keys {
+		for _, v := range r.PostForm[k] {
+			b.WriteString("<li><code>" + html.EscapeString(k) + "</code> = " + html.EscapeString(v) + "</li>")
+		}
+	}
+	b.WriteString("</ul>\n")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Write([]byte(b.String()))
+}
+
 func main() {
 	rows := flag.Int("rows", 0, "serve N random rows in memory instead of data/people.json (e.g. -rows 50000)")
 	flag.Parse()
@@ -200,6 +236,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/people", peopleHandler)
 	mux.HandleFunc("/api/soup", soupHandler)
+	mux.HandleFunc("/api/kitchen/pick", kitchenPickHandler)
 	mux.Handle("/", staticHandler(root))
 
 	log.Printf("closure-ui examples on http://%s  (serving %s)", addr, root)

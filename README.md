@@ -80,6 +80,7 @@ examples) is generated into [`release/closure-ui.md`](release/closure-ui.md).
 | `<target-closure>` | wires a button to a remote endpoint |
 | `<closure-template>` | reusable HTML template fragment |
 | `<closure-btn>` / `<closure-btn-item>` | action buttons |
+| `<closure-select>` | a select that acts on change like a button (routed or free) |
 | `<closure-lightbox>` | modal lightbox |
 | `<closure-status-bar>` + `<status-msg>` / `<status-part>` / `<status-buttons>` / `<status-kv>` | status bar with composable parts |
 | `<closure-filter-bar>` | filter input row for data grids |

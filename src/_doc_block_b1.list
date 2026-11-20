@@ -23,6 +23,8 @@
 
 <%% include-notes:closure_btn_item.js %%>
 
+<%% include-notes:closure_select.js %%>
+
 <%% include-notes:closure_lightbox.js %%>
 
 <%% include-notes:closure_lazy_iframe.js %%>

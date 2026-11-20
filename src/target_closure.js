@@ -158,6 +158,12 @@ For brevity, only the closure-specific bits are listed here.
 Without `ct-role`, the default `<template-url>` (and ct-role-less items)
 are used.
 
+The closure routes a `btn-action` from **any** source that speaks the
+`<closure-btn>` contract, i.e. exposes `getBtnData()`: `<closure-btn>`,
+`<closure-btn-item>`, `<closure-select>`, `<dash-nav-item ct-role>`, or any
+element dispatching `btn-action` with itself as `detail.source`. A `free`
+source is left alone (it submits by itself).
+
 ### Dirty-state automation
 
 | Element | Purpose |
@@ -264,18 +270,22 @@ class TargetClosure extends HTMLElement {
     // Button actions (closure-btn with ct-role)
     this.addEventListener('btn-action', e => {
       if (e.target.closest('target-closure') !== this) return;
+      // The source is whoever speaks the closure-btn contract (getBtnData):
+      // detail.source first (btn-items dispatch on their parent menu, dash-nav
+      // items and other emitters dispatch at the closure), then the event's
+      // target itself, then the enclosing <closure-btn>. A `free` source
+      // handles its own submit and is not routed.
       var btn = e.target.closest('closure-btn');
-      if (!btn || btn.hasAttribute('free')) return;
-      // Get data from the button — or from the btn-item that triggered
-      // it, carried in detail.source (items dispatch on their parent)
       var source = (e.detail && e.detail.source && e.detail.source.getBtnData) ? e.detail.source
         : (e.target.getBtnData ? e.target : btn);
+      if (!source || !source.getBtnData) return;
+      if (source.hasAttribute && source.hasAttribute('free')) return;
       var btnData = source.getBtnData();
       var role = btnData.ctRole;
       var templateName = btnData.closureTemplate;
       var template = this._findTemplate(templateName);
       if (template) {
-        if (btn.hasAttribute('clean-dirty')) this.cleanDirty('*');
+        if (source.hasAttribute && source.hasAttribute('clean-dirty')) this.cleanDirty('*');
         template.execute(role, this._collectForms(), null, btnData);
       }
     });

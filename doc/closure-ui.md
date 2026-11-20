@@ -68,65 +68,73 @@
   - [Example](#example-8)
   - [CSS Variables](#css-variables-4)
   - [Behaviour](#behaviour-9)
-- [`<closure-lightbox>`](#closure-lightbox)
+- [`<closure-select>`](#closure-select)
   - [Attributes](#attributes-8)
-  - [Methods](#methods-3)
+  - [Children](#children-2)
+  - [Properties / methods](#properties-methods)
   - [Events](#events-3)
-  - [Subscribed closure tags](#subscribed-closure-tags)
   - [Example](#example-9)
   - [CSS Variables](#css-variables-5)
   - [Behaviour](#behaviour-10)
-- [`<closure-lazy-iframe>`](#closure-lazy-iframe)
+- [`<closure-lightbox>`](#closure-lightbox)
   - [Attributes](#attributes-9)
-  - [Methods / properties](#methods-properties)
+  - [Methods](#methods-3)
   - [Events](#events-4)
+  - [Subscribed closure tags](#subscribed-closure-tags)
   - [Example](#example-10)
   - [CSS Variables](#css-variables-6)
   - [Behaviour](#behaviour-11)
+- [`<closure-lazy-iframe>`](#closure-lazy-iframe)
+  - [Attributes](#attributes-10)
+  - [Methods / properties](#methods-properties)
+  - [Events](#events-5)
+  - [Example](#example-11)
+  - [CSS Variables](#css-variables-7)
+  - [Behaviour](#behaviour-12)
 - [`<closure-dashboard>`](#closure-dashboard)
   - [Tags](#tags)
   - [`<closure-dashboard>` attributes](#closure-dashboard-attributes)
   - [`<dash-nav-item>` — navigation out and in](#dash-nav-item-navigation-out-and-in)
   - [Render targets and the opt-in ladder](#render-targets-and-the-opt-in-ladder)
   - [Methods / properties](#methods-properties-1)
-  - [Events](#events-5)
+  - [Events](#events-6)
   - [Signals (server → shell)](#signals-server-shell)
   - [`<dashboard-response-item>` (subscribed closure tag)](#dashboard-response-item-subscribed-closure-tag)
-  - [Example](#example-11)
-  - [CSS Variables](#css-variables-7)
-  - [Behaviour](#behaviour-12)
-- [`<closure-status-bar>`](#closure-status-bar)
-  - [Attributes](#attributes-10)
-  - [Children](#children-2)
   - [Example](#example-12)
   - [CSS Variables](#css-variables-8)
   - [Behaviour](#behaviour-13)
-- [`<status-msg>`](#status-msg)
-  - [Example](#example-13)
-- [`<status-part>`](#status-part)
+- [`<closure-status-bar>`](#closure-status-bar)
   - [Attributes](#attributes-11)
-  - [Example](#example-14)
-  - [Behaviour](#behaviour-14)
-- [`<status-buttons>`](#status-buttons)
-  - [Attributes](#attributes-12)
   - [Children](#children-3)
-  - [Example](#example-15)
+  - [Example](#example-13)
   - [CSS Variables](#css-variables-9)
+  - [Behaviour](#behaviour-14)
+- [`<status-msg>`](#status-msg)
+  - [Example](#example-14)
+- [`<status-part>`](#status-part)
+  - [Attributes](#attributes-12)
+  - [Example](#example-15)
   - [Behaviour](#behaviour-15)
-- [`<status-kv>`](#status-kv)
+- [`<status-buttons>`](#status-buttons)
   - [Attributes](#attributes-13)
-  - [Properties](#properties-1)
+  - [Children](#children-4)
   - [Example](#example-16)
   - [CSS Variables](#css-variables-10)
   - [Behaviour](#behaviour-16)
-- [`<closure-filter-bar>`](#closure-filter-bar)
+- [`<status-kv>`](#status-kv)
   - [Attributes](#attributes-14)
-  - [Children](#children-4)
-  - [Events](#events-6)
-  - [Properties / Methods](#properties-methods)
+  - [Properties](#properties-1)
   - [Example](#example-17)
   - [CSS Variables](#css-variables-11)
   - [Behaviour](#behaviour-17)
+- [`<closure-filter-bar>`](#closure-filter-bar)
+  - [Attributes](#attributes-15)
+  - [Children](#children-5)
+  - [Events](#events-7)
+  - [Properties / Methods](#properties-methods-1)
+  - [Example](#example-18)
+  - [CSS Variables](#css-variables-12)
+  - [Behaviour](#behaviour-18)
 - [`<closure-data-grid>`](#closure-data-grid)
   - [Data sources](#data-sources)
   - [Children (configuration)](#children-configuration)
@@ -134,98 +142,98 @@
   - [Master/detail](#masterdetail)
   - [Selection vs focus](#selection-vs-focus)
   - [Methods](#methods-4)
-  - [Events](#events-7)
+  - [Events](#events-8)
   - [Refreshing after an edit](#refreshing-after-an-edit)
   - [Cell buttons](#cell-buttons)
   - [Action menu columns](#action-menu-columns)
   - [Tag columns](#tag-columns)
   - [Footer buttons](#footer-buttons)
-  - [Example](#example-18)
+  - [Example](#example-19)
   - [Column sizing](#column-sizing)
-  - [CSS Variables](#css-variables-12)
-  - [Behaviour](#behaviour-18)
+  - [CSS Variables](#css-variables-13)
+  - [Behaviour](#behaviour-19)
 - [`<closure-data-grid>` children](#closure-data-grid-children)
   - [Tags](#tags-1)
-  - [Example](#example-19)
+  - [Example](#example-20)
   - [`<grid-col>` sizing attributes](#grid-col-sizing-attributes)
-  - [Behaviour](#behaviour-19)
+  - [Behaviour](#behaviour-20)
 - [`<closure-row-viewer>`](#closure-row-viewer)
-  - [Attributes](#attributes-15)
+  - [Attributes](#attributes-16)
   - [Per-child binding attributes](#per-child-binding-attributes)
   - [Properties](#properties-2)
-  - [Example](#example-20)
-  - [Behaviour](#behaviour-20)
+  - [Example](#example-21)
+  - [Behaviour](#behaviour-21)
 - [`<closure-checkbox-tree>`](#closure-checkbox-tree)
-  - [Attributes](#attributes-16)
-  - [Children](#children-5)
+  - [Attributes](#attributes-17)
+  - [Children](#children-6)
   - [Form value](#form-value)
   - [Properties](#properties-3)
   - [Methods](#methods-5)
-  - [Events](#events-8)
-  - [Example](#example-21)
-  - [Behaviour](#behaviour-21)
-- [`<cbt-item>`](#cbt-item)
-  - [Attributes](#attributes-17)
+  - [Events](#events-9)
   - [Example](#example-22)
   - [Behaviour](#behaviour-22)
-- [`<closure-checkbox-group>`](#closure-checkbox-group)
+- [`<cbt-item>`](#cbt-item)
   - [Attributes](#attributes-18)
-  - [Children](#children-6)
+  - [Example](#example-23)
+  - [Behaviour](#behaviour-23)
+- [`<closure-checkbox-group>`](#closure-checkbox-group)
+  - [Attributes](#attributes-19)
+  - [Children](#children-7)
   - [Form value](#form-value-1)
   - [Properties](#properties-4)
   - [Methods](#methods-6)
-  - [Events](#events-9)
-  - [Example](#example-23)
-  - [Behaviour](#behaviour-23)
-- [`<closure-tab-bar>`](#closure-tab-bar)
-  - [Attributes](#attributes-19)
-  - [Children](#children-7)
-  - [Methods](#methods-7)
   - [Events](#events-10)
   - [Example](#example-24)
-  - [CSS Variables](#css-variables-13)
   - [Behaviour](#behaviour-24)
-- [`<closure-tab>`](#closure-tab)
+- [`<closure-tab-bar>`](#closure-tab-bar)
   - [Attributes](#attributes-20)
+  - [Children](#children-8)
+  - [Methods](#methods-7)
+  - [Events](#events-11)
   - [Example](#example-25)
+  - [CSS Variables](#css-variables-14)
   - [Behaviour](#behaviour-25)
+- [`<closure-tab>`](#closure-tab)
+  - [Attributes](#attributes-21)
+  - [Example](#example-26)
+  - [Behaviour](#behaviour-26)
 - [`<closure-summary>`](#closure-summary)
   - [Pairing](#pairing)
-  - [Attributes](#attributes-21)
-  - [Methods](#methods-8)
-  - [CSS Variables](#css-variables-14)
-  - [Behaviour](#behaviour-26)
-- [`<closure-form-row>`](#closure-form-row)
   - [Attributes](#attributes-22)
-  - [Children](#children-8)
-  - [Density](#density)
-  - [Example](#example-26)
+  - [Methods](#methods-8)
   - [CSS Variables](#css-variables-15)
   - [Behaviour](#behaviour-27)
-- [`<closure-form-field>`](#closure-form-field)
+- [`<closure-form-row>`](#closure-form-row)
   - [Attributes](#attributes-23)
   - [Children](#children-9)
+  - [Density](#density)
   - [Example](#example-27)
+  - [CSS Variables](#css-variables-16)
   - [Behaviour](#behaviour-28)
-- [`<closure-data-source>`](#closure-data-source)
+- [`<closure-form-field>`](#closure-form-field)
   - [Attributes](#attributes-24)
   - [Children](#children-10)
   - [Example](#example-28)
   - [Behaviour](#behaviour-29)
-- [`<fingerprint-hands>`](#fingerprint-hands)
+- [`<closure-data-source>`](#closure-data-source)
   - [Attributes](#attributes-25)
+  - [Children](#children-11)
+  - [Example](#example-29)
+  - [Behaviour](#behaviour-30)
+- [`<fingerprint-hands>`](#fingerprint-hands)
+  - [Attributes](#attributes-26)
   - [Form value](#form-value-2)
   - [Properties](#properties-5)
-  - [Events](#events-11)
-  - [Example](#example-29)
-  - [CSS Variables](#css-variables-16)
-  - [Behaviour](#behaviour-30)
-- [`<session-keep-alive>`](#session-keep-alive)
-  - [Attributes](#attributes-26)
   - [Events](#events-12)
   - [Example](#example-30)
   - [CSS Variables](#css-variables-17)
   - [Behaviour](#behaviour-31)
+- [`<session-keep-alive>`](#session-keep-alive)
+  - [Attributes](#attributes-27)
+  - [Events](#events-13)
+  - [Example](#example-31)
+  - [CSS Variables](#css-variables-18)
+  - [Behaviour](#behaviour-32)
 
 
 # Helpers
@@ -1192,6 +1200,12 @@ For brevity, only the closure-specific bits are listed here.
 Without `ct-role`, the default `<template-url>` (and ct-role-less items)
 are used.
 
+The closure routes a `btn-action` from **any** source that speaks the
+`<closure-btn>` contract, i.e. exposes `getBtnData()`: `<closure-btn>`,
+`<closure-btn-item>`, `<closure-select>`, `<dash-nav-item ct-role>`, or any
+element dispatching `btn-action` with itself as `detail.source`. A `free`
+source is left alone (it submits by itself).
+
 ### Dirty-state automation
 
 | Element | Purpose |
@@ -1663,6 +1677,111 @@ Consumed (with fallbacks):
 > hidden form with the merged section-prefixed fields. This bypasses
 > `<target-closure>` entirely — useful for "free" actions like signing
 > out from inside a dropdown.
+
+---
+
+# `<closure-select>`
+
+A `<select>` that acts when its value changes, exactly as a `<closure-btn>`
+acts when clicked: the `change` is the trigger, the chosen value travels as
+one more field. Same attributes, same `getBtnData()` contract, same two
+paths — a routed `btn-action` handled by the enclosing `<target-closure>`,
+or a `free` hidden-form submit to `url`. Renders a native `<select>` inside
+a shadow DOM (the system's own list, keyboard and all); the `<option>`s are
+declared in light DOM and mirrored inside.
+
+Outside any closure it is a plain picker: with `name` it joins the
+enclosing `<form>` as a field (form-associated) without acting on its own.
+
+## Attributes
+
+| Attribute | Description |
+|---|---|
+| `name="x"`              | the field name of the chosen value in the payload; with it the element is also a field of the enclosing native `<form>` |
+| `ct-role="x"`           | role used to match a `<closure-template>` template URL / response |
+| `closure-template="x"`  | name of a specific `<closure-template>` to invoke |
+| `section="x"`           | section key when packaging the fields for the closure |
+| `data-*`                | included in `getBtnData()`'s payload; the chosen `<option>`'s own `data-*` are merged on top (the option wins) |
+| `target-id="x"`         | element to receive the dispatched event (default: self, bubbling up to the closure) |
+| `event="x"`             | event name to dispatch (default `btn-action`) |
+| `free`                  | bypass target-closure: the change POSTs to `url` (hidden form, full navigation) |
+| `url="x"`               | (with `free`) destination URL of the auto-generated form; without it, like a `<form>` without `action`, the page's own URL |
+| `get` / `post` / `method="get\|post"` | (with `free`) the submit method, as on `<closure-btn free>`; default **POST** |
+| `preserve`              | (with `free` + GET) keep the url's existing query, appending the fields |
+| `disabled`              | the select is disabled and never acts |
+| `label="x"`             | tooltip (`title`) of the select |
+
+## Children
+
+`<option value="x" [selected] [disabled] [data-*]>Label</option>` elements, as in a
+native `<select>`; `<optgroup>` is accepted too. Changing the light-DOM options
+after connect requires `refresh()`.
+
+## Properties / methods
+
+| Member | Description |
+|---|---|
+| `.value` (get/set) | the chosen value; setting it does **not** act (no event, no submit) |
+| `getBtnData()`     | `{ ctRole, closureTemplate, sections: { [section]: { …data-*, …option data-*, [name or "value"]: value } } }` |
+| `refresh()`        | rebuild the inner options from the light DOM |
+
+## Events
+
+| Event | Bubbles | Detail |
+|---|---|---|
+| `btn-action` (or custom `event`) | yes | none — the same event a `<closure-btn>` dispatches; `<target-closure>` reads `getBtnData()` from the source |
+| `change` | yes | none — re-dispatched from the inner select so page scripts and dirty tracking see it |
+
+## Example
+
+```html
+<!-- routed: the closure runs the template "action" with action=set-language, lang=<chosen> -->
+<target-closure>
+  <closure-template name="action" send-behavior="fetch" parse="closure-response">
+    <template-url url="/action/" method="POST"></template-url>
+  </closure-template>
+  <closure-select name="lang" ct-role="action" closure-template="action" data-action="set-language">
+    <option value="en" selected>English</option>
+    <option value="fr">Français</option>
+  </closure-select>
+</target-closure>
+
+<!-- free: GET ?lang=fr on the same page -->
+<closure-select name="lang" free get url="">
+  <option value="en">English</option>
+  <option value="fr">Français</option>
+</closure-select>
+```
+
+## CSS Variables
+
+Consumed (with fallbacks):
+
+| Variable | Default | Description |
+|---|---|---|
+| `--select-bg`        | `#fff`                | background of the select |
+| `--select-color`     | `var(--text, #111827)` | text colour |
+| `--select-border`    | `var(--border, #e5e7eb)` | border colour |
+| `--select-radius`    | `4px`                 | border radius |
+| `--select-padding`   | `4px 8px`             | inner padding |
+| `--select-font-size` | `14px`                | font size |
+| `--font`             | `sans-serif`          | font family |
+| `--primary`          | `#4f46e5`             | focus ring |
+
+## Behaviour
+
+> **Note:** the trigger is the user's `change`. Setting `.value` from a
+> script, or a `<response-item type="set-value">`, changes the selection
+> silently; dispatch `change` on the element yourself if you want it to act.
+
+> **Note:** as with `<closure-btn>`, a routed `<closure-select>` needs the
+> `<target-closure>` to accept it as a source: the closure reads
+> `getBtnData()` from the element that dispatched `btn-action` (or from
+> `detail.source`), whatever its tag.
+
+> **Note:** the inner `<select>` lives in the shadow DOM, so page CSS cannot
+> reach it: use the `--select-*` variables (or the shared tokens) to restyle
+> it. The host is `display: inline-block`.
 
 ---
 

@@ -8,7 +8,7 @@
 <body>
 <h1>closure-ui — Buttons and actions</h1>
 <p>Demo of the button/action components:
-  <code>&lt;closure-btn&gt;</code>, <code>&lt;closure-btn-item&gt;</code>,
+  <code>&lt;closure-btn&gt;</code>, <code>&lt;closure-btn-item&gt;</code>, <code>&lt;closure-select&gt;</code>,
   <code>&lt;btn-grid&gt;</code>, <code>&lt;target-closure&gt;</code>,
   <code>&lt;closure-template&gt;</code> and <code>&lt;status-buttons&gt;</code>.</p>
 <p>This page is deliberately <strong>pure HTML</strong> — it has no stylesheet at
@@ -273,6 +273,62 @@
     &lt;closure-btn ct-role="defer" stretch-priority="0"&gt;Defer&lt;/closure-btn&gt;
   &lt;/status-buttons&gt;
 &lt;/closure-status-bar&gt;</pre>
+
+<!-- ============ 8. closure-select ============ -->
+<h2>8. <code>&lt;closure-select&gt;</code> — a select that acts like a button</h2>
+<p>A native <code>&lt;select&gt;</code> (inside a shadow DOM) whose <code>change</code> does
+   what a <code>&lt;closure-btn&gt;</code>'s click does: same attributes, same
+   <code>getBtnData()</code>, the chosen value added as the field named by <code>name</code>.
+   The chosen <code>&lt;option&gt;</code>'s own <code>data-*</code> are merged on top of the
+   element's. With <code>free</code> it submits a hidden form instead (full navigation).</p>
+
+<p><strong>Routed</strong> — inside a closure, the change runs the template <code>pick</code>
+   with <code>dish=&lt;chosen&gt;</code> and <code>course=…</code> from the option. Offline the POST
+   fails and the <code>no-response</code> message appears, which shows the wiring works:</p>
+
+<target-closure name="kitchen">
+  <closure-template name="pick">
+    <template-url url="/api/kitchen/pick" method="POST" send-behavior="fetch"
+                  response-target-id="pick-result"></template-url>
+    <template-response-fail type="no-response">
+      <p>⚠ No server: the POST to /api/kitchen/pick failed (expected offline) — the select did fire the template.</p>
+    </template-response-fail>
+  </closure-template>
+
+  <p><label>Today's dish
+    <closure-select name="dish" ct-role="pick" closure-template="pick" data-table="7" label="Pick a dish">
+      <option value="">— choose —</option>
+      <option value="tomato-soup"  data-course="starter">Tomato soup</option>
+      <option value="pumpkin-soup" data-course="starter">Pumpkin soup</option>
+      <option value="lentil-stew"  data-course="main">Lentil stew</option>
+      <option value="apple-pie"    data-course="dessert">Apple pie</option>
+    </closure-select>
+  </label></p>
+  <div id="pick-result"></div>
+</target-closure>
+
+<pre>&lt;closure-select name="dish" ct-role="pick" closure-template="pick" data-table="7"&gt;
+  &lt;option value="tomato-soup" data-course="starter"&gt;Tomato soup&lt;/option&gt;
+  …
+&lt;/closure-select&gt;
+&lt;!-- payload: table=7, course=starter, dish=tomato-soup --&gt;</pre>
+
+<p><strong>Free</strong> — no closure at all: the change GETs this same page with the
+   value as query string (works from <code>file://</code>; look at the address bar):</p>
+
+<closure-select name="lettuce" free get url="buttons-actions.html" label="Lettuce">
+  <option value="">— lettuce —</option>
+  <option value="romaine">Romaine</option>
+  <option value="iceberg">Iceberg</option>
+  <option value="butterhead">Butterhead</option>
+</closure-select>
+
+<pre>&lt;closure-select name="lettuce" free get url="buttons-actions.html"&gt;…&lt;/closure-select&gt;
+&lt;!-- navigates to buttons-actions.html?lettuce=romaine --&gt;</pre>
+
+<p><strong>Passive</strong> — with <code>name</code> and neither <code>ct-role</code> nor
+   <code>free</code> it is just a field of the enclosing form (form-associated), nothing
+   happens on change until the form is submitted.</p>
 
 <p><a href="index.html">← Back to index</a></p>
 

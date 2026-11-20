@@ -1200,18 +1200,22 @@ class TargetClosure extends HTMLElement {
     // Button actions (closure-btn with ct-role)
     this.addEventListener('btn-action', e => {
       if (e.target.closest('target-closure') !== this) return;
+      // The source is whoever speaks the closure-btn contract (getBtnData):
+      // detail.source first (btn-items dispatch on their parent menu, dash-nav
+      // items and other emitters dispatch at the closure), then the event's
+      // target itself, then the enclosing <closure-btn>. A `free` source
+      // handles its own submit and is not routed.
       var btn = e.target.closest('closure-btn');
-      if (!btn || btn.hasAttribute('free')) return;
-      // Get data from the button — or from the btn-item that triggered
-      // it, carried in detail.source (items dispatch on their parent)
       var source = (e.detail && e.detail.source && e.detail.source.getBtnData) ? e.detail.source
         : (e.target.getBtnData ? e.target : btn);
+      if (!source || !source.getBtnData) return;
+      if (source.hasAttribute && source.hasAttribute('free')) return;
       var btnData = source.getBtnData();
       var role = btnData.ctRole;
       var templateName = btnData.closureTemplate;
       var template = this._findTemplate(templateName);
       if (template) {
-        if (btn.hasAttribute('clean-dirty')) this.cleanDirty('*');
+        if (source.hasAttribute && source.hasAttribute('clean-dirty')) this.cleanDirty('*');
         template.execute(role, this._collectForms(), null, btnData);
       }
     });
@@ -2743,6 +2747,154 @@ class ClosureBtnItem extends HTMLElement {
 }
 
 customElements.define('closure-btn-item', ClosureBtnItem);
+
+
+class ClosureSelect extends HTMLElement {
+  static formAssociated = true;
+
+  constructor() {
+    super();
+    this.attachShadow({ mode: 'open' });
+    this._internals = this.attachInternals ? this.attachInternals() : null;
+  }
+
+  connectedCallback() {
+    if (this._built) return;
+    this._built = true;
+    this.style.display = 'inline-block';
+    const style = document.createElement('style');
+    style.textContent = `
+      :host { display: inline-block; }
+      select {
+        font: inherit;
+        font-family: var(--font, sans-serif);
+        font-size: var(--select-font-size, 14px);
+        color: var(--select-color, var(--text, #111827));
+        background: var(--select-bg, #fff);
+        border: 1px solid var(--select-border, var(--border, #e5e7eb));
+        border-radius: var(--select-radius, 4px);
+        padding: var(--select-padding, 4px 8px);
+        max-width: 100%;
+        cursor: pointer;
+      }
+      select:focus { outline: 2px solid var(--primary, #4f46e5); outline-offset: 1px; }
+      select:disabled { cursor: default; opacity: .6; }
+    `;
+    const select = document.createElement('select');
+    this._select = select;
+    this.shadowRoot.appendChild(style);
+    this.shadowRoot.appendChild(select);
+    this.refresh();
+    select.addEventListener('change', () => this._onChange());
+  }
+
+  static get observedAttributes() { return ['disabled', 'label']; }
+
+  attributeChangedCallback() {
+    if (this._select) this._syncState();
+  }
+
+  // Mirror the light-DOM <option>s (and <optgroup>s) into the inner select.
+  refresh() {
+    const select = this._select;
+    if (!select) return;
+    select.innerHTML = '';
+    const copy = (src, dst) => {
+      for (const child of src.children) {
+        const tag = child.tagName;
+        if (tag === 'OPTION') {
+          const o = document.createElement('option');
+          o.value = child.getAttribute('value') != null ? child.getAttribute('value') : child.textContent;
+          o.textContent = child.textContent;
+          if (child.hasAttribute('selected')) o.selected = true;
+          if (child.hasAttribute('disabled')) o.disabled = true;
+          o._light = child; // the source option, for its data-*
+          dst.appendChild(o);
+        } else if (tag === 'OPTGROUP') {
+          const g = document.createElement('optgroup');
+          g.label = child.getAttribute('label') || '';
+          copy(child, g);
+          dst.appendChild(g);
+        }
+      }
+    };
+    copy(this, select);
+    this._syncState();
+    this._syncFormValue();
+  }
+
+  _syncState() {
+    this._select.disabled = this.hasAttribute('disabled');
+    const label = this.getAttribute('label');
+    if (label) this._select.title = label; else this._select.removeAttribute('title');
+  }
+
+  // Form participation only with a name (a nameless select is not a field).
+  _syncFormValue() {
+    if (!this._internals) return;
+    if (this.hasAttribute('name')) this._internals.setFormValue(this.value);
+    else this._internals.setFormValue(null);
+  }
+
+  get value() { return this._select ? this._select.value : ''; }
+  set value(v) {
+    if (!this._select) return;
+    this._select.value = v == null ? '' : String(v);
+    this._syncFormValue();
+  }
+
+  // The chosen option's source element (for its data-*), or null.
+  _chosenLightOption() {
+    const o = this._select && this._select.selectedOptions[0];
+    return o ? (o._light || null) : null;
+  }
+
+  // The closure-btn contract: data-* of the element, the chosen option's data-*
+  // on top (the option wins), and the value under `name` (or "value").
+  getBtnData() {
+    const section = this.getAttribute('section') || '';
+    const fields = {};
+    for (const attr of this.attributes) {
+      if (attr.name.startsWith('data-')) fields[attr.name.slice(5)] = attr.value;
+    }
+    const opt = this._chosenLightOption();
+    if (opt) {
+      for (const attr of opt.attributes) {
+        if (attr.name.startsWith('data-')) fields[attr.name.slice(5)] = attr.value;
+      }
+    }
+    fields[this.getAttribute('name') || 'value'] = this.value;
+    const sections = {};
+    sections[section] = fields;
+    return {
+      ctRole: this.getAttribute('ct-role') || '',
+      closureTemplate: this.getAttribute('closure-template') || '',
+      sections: sections
+    };
+  }
+
+  // The change is the click: free url → hidden-form submit; otherwise the
+  // routed event, as <closure-btn>._dispatch() does.
+  _onChange() {
+    this._syncFormValue();
+    // let the page (and the closure's dirty tracking) see a plain change too
+    this.dispatchEvent(new Event('change', { bubbles: true }));
+    if (this.hasAttribute('disabled')) return;
+    if (this.hasAttribute('free')) {
+      const url = this.getAttribute('url') || '';
+      closureFreeSubmit(this, url, 'post');
+      return;
+    }
+    const eventName = this.getAttribute('event') || 'btn-action';
+    const targetId = this.getAttribute('target-id') || '';
+    const dest = targetId ? document.getElementById(targetId) : this;
+    if (dest) {
+      dest.dispatchEvent(new CustomEvent(eventName, { bubbles: true, detail: { source: this } }));
+    }
+  }
+}
+
+if (!customElements.get('closure-select')) customElements.define('closure-select', ClosureSelect);
 
 
 class ClosureLightbox extends HTMLElement {

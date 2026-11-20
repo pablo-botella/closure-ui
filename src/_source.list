@@ -10,6 +10,7 @@
 /* <%% include:closure_template.js%%> */
 /* <%% include:closure_btn.js%%> */
 /* <%% include:closure_btn_item.js%%> */
+/* <%% include:closure_select.js%%> */
 /* <%% include:closure_lightbox.js%%> */
 /* <%% include:closure_lazy_iframe.js%%> */
 /* <%% include:closure_dashboard.js%%> */
