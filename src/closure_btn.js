@@ -32,6 +32,7 @@ them); button state and form validation stay with the surrounding closure / form
 | `free`                  | bypass target-closure: click POSTs to `url` (or fires the event itself) |
 | `url="x"`               | (with `free`) destination URL of the auto-generated form |
 | `get` / `post` / `method="get\|post"` | (with `free`) pick the submit method — quick boolean attributes win over `method=`. Default: **POST** (an action button). On GET the `data-*` fields become the query string, replacing any query on `url` (add `preserve` to keep it) |
+| `target="x"`            | (with `free` and `url`) name of the window or frame the answer opens in, as the `target` of a form (`_blank`, or a name of your own to reuse one window) |
 | `event="x"`             | event name to dispatch (default `btn-action`) |
 | `target-id="x"`         | element to receive the dispatched event (default: self) |
 | `target-selector="css"` | selector target for local client actions |
@@ -431,7 +432,8 @@ class ClosureBtn extends HTMLElement {
           a.addEventListener('click', (e) => {
             e.preventDefault();
             if (disabled || readonly) return;
-            closureFreeSubmit(self, url, 'post');
+            // `target`: the window (or frame) the answer opens in
+            closureFreeSubmit(self, url, 'post', { target: self.getAttribute('target') || '' });
           });
         } else {
           a.addEventListener('click', (e) => {

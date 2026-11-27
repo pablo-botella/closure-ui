@@ -3,7 +3,8 @@
 
 Projects the currently selected (or focused) row of a
 `<closure-data-grid>` onto its descendants through `bind` attributes.
-Subscribes to the grid's `row-select` and `row-focus` events; while no
+Subscribes to the grid's `row-select` and `row-focus` events, and to
+`row-update` (the data of the row on show changed in place); while no
 row is selected it hides every bound child.
 
 ## Attributes
@@ -25,9 +26,132 @@ row is selected it hides every bound child.
 | `bind-hide="field=v"` | hide when `row[field] === v` |
 | `bind-keep-space`     | on `bind-show` / `bind-hide`, hide with `visibility` instead of `display` |
 | `bind-crlf="<br>"`    | when the bound text has line breaks, render via `innerHTML` with the given separator |
+| `bind-rows="field"`   | `row[field]` is a **list of rows**: the content of the element is the markup of one of them, repeated for each — see *Lists inside a row* |
+| `bind-data-key="field"` | set the attribute `data-key` to `row[field]` — on any element. The `data-*` of a button are the fields it sends, so this is how a field travels under a name of its own |
+| `abind-text="field"`  | write `row[field]` as the content of the element, like `bind` — for the elements where `bind` means something else (`<closure-btn>`) |
+| `abind-tooltip="field"` | set the tooltip of the element (its `title`) to `row[field]` |
+| `abind-text-format="…"` / `abind-tooltip-format="…"` | with several fields (`abind-tooltip="a,b"`), the text to build from them: `%1`, `%2`… are the fields in the order listed — see *Texts made of several fields* |
+| `..field` (in any of the above) | inside a `bind-rows` list, read the field from the row that **holds** the list — see *Lists inside a row* |
 | `map-data-id="id"`    | resolve through a `<data-map>` for icon / label / color substitution |
 | `map-show="icon"`     | with `map-data-id`, render only the icon part |
 | `map-show="label"`    | with `map-data-id`, render only the label part |
+
+These attributes are not the viewer's alone: the `<grid-card>` of a
+`<closure-data-grid>` paints each of its rows with the very same ones.
+
+## Lists inside a row
+
+A row can carry a list of rows in one of its fields — an array in a JSON
+answer, a `<g-detail>` in `<g-row>` markup. `bind-rows` writes it out: the
+element keeps, as written in the page, the markup of **one** row of the
+list, and gets one copy of it per row.
+
+```html
+<closure-row-viewer target="users-grid">
+  <span bind="username"></span>
+  <ul bind-rows="sessions" bind-show="sessions">
+    <li><span bind="device"></span> since <span bind="since"></span></li>
+  </ul>
+</closure-row-viewer>
+```
+
+Inside the element, `bind` and the other attributes read the row **of the
+list**, not the row that holds it. A list can hold lists. A field that is
+missing or is an empty list leaves the element empty, and `bind-show` on
+that same field hides it.
+
+A row of the list reaches the row that holds it — its master — with two
+dots before the name: `..field`. It works wherever a field is named
+(`bind`, `bind-show`, `bind-hide`, `bind-data-*`, `abind-*`). Each pair of
+dots climbs one level, so in a list inside a list `....field` reads two rows
+up; a level that does not exist reads as empty.
+
+```html
+<ul bind-rows="sessions">
+  <li><span bind="device"></span> of <span bind="..username"></span></li>
+</ul>
+```
+
+When the row of the list holds components, write it inside a `<template>`,
+the only child of the element — there none of them has built itself yet,
+and every copy must start from that:
+
+```html
+<div bind-rows="sessions"><template>
+  <closure-status-bar>
+    <status-kv key="Device" bind="device"></status-kv>
+    <status-kv key="Since" bind="since"></status-kv>
+  </closure-status-bar>
+</template></div>
+```
+
+## Buttons that send fields of the row
+
+A `<closure-btn>` sends its `data-*` attributes. `bind="a,b"` fills one per
+field, named as the field (`data-a`, `data-b`; `..a` also gives `data-a`).
+When the name to send is not the name of the field — or two rows have a field
+of the same name — `bind-data-key="field"` names it:
+
+```html
+<div bind-rows="lines">
+  <closure-btn free url="/orders/line" target="line-edit" return-refresh="row"
+               bind-data-order="..id" bind-data-line="id"
+               abind-text="number"></closure-btn>
+</div>
+```
+
+The button sends `order` (the `id` of the row that holds the list) and `line`
+(the `id` of the row of the list), and shows the number of the line.
+`bind-data-*` is not the button's alone: it sets the attribute on any element.
+
+A menu works the same way. The fields bound on the `<closure-btn menu>` go
+with every item, and an item adds its own:
+
+```html
+<div bind-rows="lines">
+  <closure-btn menu="Line" target="line-edit"
+               bind-data-order="..id" bind-data-line="id">
+    <closure-btn-item url="/orders/line/edit" return-refresh="row">Edit</closure-btn-item>
+    <closure-btn-item url="/orders/line/copy" target="_blank"
+                      bind-data-product="code">Copy</closure-btn-item>
+  </closure-btn>
+</div>
+```
+
+Both items send `order` and `line`; *Copy* also sends `product`. *Edit* opens
+in `line-edit`, the window of the menu, and *Copy* in a new one.
+
+## Texts made of several fields
+
+`abind-text` and `abind-tooltip` take one field or several, separated by
+commas. Several fields are joined by a space, or laid out by the matching
+`-format`, where `%1`, `%2`… stand for the fields in the order listed (`%%`
+is a percent sign):
+
+```html
+<closure-btn abind-text="number"
+             abind-tooltip="..order_number,number"
+             abind-tooltip-format="View order %1, line %2"></closure-btn>
+```
+
+When none of the fields has a value nothing is written: the element is left
+empty, or without tooltip, instead of showing the bare words of the format.
+
+## Actions that leave the window
+
+| Attribute on a descendant | Effect |
+|---|---|
+| `return-refresh="row"` | the element takes the user to **another window** with the row on show — a `<form>` or a link with a `target`. When the user comes back to this window, the grid asks the server for that row again (its `single-row` query) |
+| `return-refresh="all"` | the same, but the grid asks for its whole page again, staying where the user was |
+
+```html
+<closure-row-viewer target="users-grid">
+  <form action="/admin/users/edit" method="post" target="user-edit" return-refresh="row">
+    <input type="hidden" name="id" bind="id">
+    <button type="submit">Edit</button>
+  </form>
+</closure-row-viewer>
+```
 
 ## Properties
 
@@ -52,7 +176,8 @@ row is selected it hides every bound child.
 
 ## Behaviour
 
-> **Note:** elements with `[bind]` are hidden via `visibility: hidden`
+> **Note:** elements with `[bind]` — and those with `bind-data-*` or
+> `abind-*` — are hidden via `visibility: hidden`
 > (so layout is preserved) when no row is selected. Elements with
 > `[bind-show]` or `[bind-hide]` are hidden via `display: none`, unless
 > the child has `bind-keep-space` or the viewer has `keep-space`.
@@ -66,6 +191,18 @@ row is selected it hides every bound child.
 > **Note:** when a `<data-map>` resolution returns a `color` field, that
 > colour is applied to the bound element's `style.color`. Cleared on the
 > next bind without a colour.
+
+> **Note — `return-refresh`.** An edit opened in another window leaves this
+> page untouched, so the grid would go on showing the row as it was. A form
+> marked `return-refresh` tells the grid when it is **submitted**, any other
+> element when it is **clicked**; nothing is asked then. The request goes
+> when this window loses the user and gets them back (window `blur` then
+> `focus`, or the tab hidden and shown again). Several rows sent out before
+> coming back are all asked for; a user who never left asks for nothing. With
+> `"row"` the grid needs a `single-row` query; the viewer of a detail grid fed
+> by `detail-rows` refreshes the row of the master, which is where those rows
+> come from. An inline grid has nobody to ask for a page: there `"all"` reloads
+> the page.
 
 ---
 %%>*/
@@ -107,6 +244,7 @@ class ClosureRowViewer extends HTMLElement {
     if (this._grid && this._onRowSelect) {
       this._grid.removeEventListener('row-select', this._onRowSelect);
       this._grid.removeEventListener('row-focus', this._onRowFocus);
+      this._grid.removeEventListener('row-update', this._onRowUpdate);
     }
   }
 
@@ -114,13 +252,37 @@ class ClosureRowViewer extends HTMLElement {
     if (!this._grid || !this._onRowSelect) return;
     this._grid.addEventListener('row-select', this._onRowSelect);
     this._grid.addEventListener('row-focus', this._onRowFocus);
+    this._grid.addEventListener('row-update', this._onRowUpdate);
   }
 
   _init() {
     // Save original children as template
     this._template = this.innerHTML;
     this._bindTarget();
+    this._watchActions();
     this._scheduleUpdate();
+  }
+
+  // ---
+  // Children marked `return-refresh` are actions that take the user to
+  // another window: a form when it is submitted, anything else (a link with
+  // a `target`) when it is clicked. The grid is told which row went out, and
+  // asks for it again when the user comes back to this window.
+  _watchActions() {
+    this.addEventListener('submit', e => {
+      const form = e.target;
+      if (form && form.hasAttribute && form.hasAttribute('return-refresh')) this._expectReturn(form);
+    });
+    this.addEventListener('click', e => {
+      const el = e.target && e.target.closest ? e.target.closest('[return-refresh]') : null;
+      if (el && el.tagName !== 'FORM' && this.contains(el)) this._expectReturn(el);
+    });
+  }
+
+  // ---
+  _expectReturn(el) {
+    if (!this._row || !this._grid || typeof this._grid.expectReturn !== 'function') return;
+    this._grid.expectReturn(el.getAttribute('return-refresh') === 'all' ? 'all' : 'row', this._row);
   }
 
   _bindTarget() {
@@ -132,6 +294,8 @@ class ClosureRowViewer extends HTMLElement {
 
     this._onRowSelect = e => this._setRow(e.detail.row || null);
     this._onRowFocus = e => this._setRow(e.detail.row || null);
+    // The data of the row on show changed in place (same object): paint it again
+    this._onRowUpdate = e => { if (e.detail && e.detail.row === this._row) this._scheduleUpdate(); };
     this._attachGridListeners();
 
     // Sync with current selection if grid already has one
@@ -142,79 +306,20 @@ class ClosureRowViewer extends HTMLElement {
 
   _update() {
     this.style.visibility = 'visible';
-    this.querySelectorAll('[bind]').forEach(el => {
+    const keepSpace = this.hasAttribute('keep-space');
+    // Only the elements of the row on show: what a bind-rows list holds is
+    // the markup of its own rows, and is written when the list is
+    closureBindOwn(this, '[bind]').concat(closureBindNamed(this)).forEach(el => {
       el.style.visibility = this._row ? 'visible' : 'hidden';
     });
-    this.querySelectorAll('[bind-show]').forEach(el => {
-      if (!this._row) this._setConditionalVisibility(el, false);
-    });
-    this.querySelectorAll('[bind-hide]').forEach(el => {
-      if (!this._row) this._setConditionalVisibility(el, false);
-    });
-    if (!this._row) return;
-
-    // Conditional visibility: bind-show / bind-hide with "field" or "field=value".
-    this.querySelectorAll('[bind-show]').forEach(el => {
-      this._setConditionalVisibility(el, this._matchesBindCondition(el.getAttribute('bind-show') || ''));
-    });
-    this.querySelectorAll('[bind-hide]').forEach(el => {
-      this._setConditionalVisibility(el, !this._matchesBindCondition(el.getAttribute('bind-hide') || ''));
-    });
-
-    // Update spans/labels with bind (skip closure-btn elements — they use bind for data attributes only)
-    this.querySelectorAll('[bind]').forEach(el => {
-      const tag = el.tagName.toLowerCase();
-      if (tag === 'closure-btn' || tag === 'closure-btn-item') return;
-      const field = el.getAttribute('bind');
-      if (!field) return;
-
-      // Single field → display value
-      if (!field.includes(',')) {
-        const val = this._row[field] !== undefined ? String(this._row[field]) : '';
-        const mapId = el.getAttribute('map-data-id');
-        if (mapId) {
-          const map = document.getElementById(mapId);
-          const resolved = map ? map.resolve(val) : null;
-          if (resolved) {
-            const show = el.getAttribute('map-show') || '';
-            let display = '';
-            if (show === 'icon') display = resolved.icon || '';
-            else if (show === 'label') display = resolved.label || '';
-            else {
-              if (resolved.icon) display += resolved.icon;
-              if (resolved.label) display += (display ? ' ' : '') + resolved.label;
-            }
-            el.textContent = display || val;
-            if (resolved.color) el.style.color = resolved.color;
-            else el.style.color = '';
-          } else {
-            el.textContent = val;
-            el.style.color = '';
-          }
-        } else if (this._usesValueProperty(el)) {
-          el.value = val;
-        } else {
-          const crlf = el.getAttribute('bind-crlf');
-          if (crlf && val.includes('\n')) {
-            // val is row data — escape it so only the author-provided
-            // crlf separator is interpreted as HTML
-            const esc = val.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-            el.innerHTML = esc.replace(/\r?\n/g, crlf);
-          } else {
-            el.textContent = val;
-          }
-        }
-      }
-    });
-
-    // Update closure-btn / closure-btn-item data attributes from bind
-    this.querySelectorAll('closure-btn[bind], closure-btn-item[bind]').forEach(el => {
-      const fields = el.getAttribute('bind').split(',').map(s => s.trim()).filter(Boolean);
-      fields.forEach(f => {
-        const val = this._row[f] !== undefined ? String(this._row[f]) : '';
-        el.setAttribute('data-' + f, val);
-      });
-    });
+    if (!this._row) {
+      closureBindOwn(this, '[bind-show], [bind-hide]').forEach(el => closureBindVisible(el, false, keepSpace));
+      closureBindLists(this, null); // no row: its lists have no rows
+      return;
+    }
+    // The fields of the row, written by the shared binding (the same one
+    // paints the cards of a grid)
+    closureBindRow(this, this._row, { keepSpace });
   }
 
   // ---
@@ -232,42 +337,6 @@ class ClosureRowViewer extends HTMLElement {
       this._pendingUpdate = false;
       this._update();
     });
-  }
-
-  // ---
-  _setConditionalVisibility(el, isVisible) {
-    const keepSpace = this.hasAttribute('keep-space') || el.hasAttribute('bind-keep-space');
-    if (isVisible) {
-      el.style.display = '';
-      el.style.visibility = 'visible';
-    } else if (keepSpace) {
-      el.style.display = '';
-      el.style.visibility = 'hidden';
-    } else {
-      el.style.display = 'none';
-      el.style.visibility = '';
-    }
-  }
-
-  // ---
-  _matchesBindCondition(cond) {
-    const eq = cond.indexOf('=');
-    if (eq < 0) {
-      // Same truthiness as the grid: row values are strings, so "0" and
-      // "false" must count as falsy
-      const actual = String(this._row[cond] !== undefined ? this._row[cond] : '').trim().toLowerCase();
-      return actual !== '' && actual !== '0' && actual !== 'false';
-    }
-    const field = cond.substring(0, eq);
-    const expected = cond.substring(eq + 1);
-    const actual = String(this._row[field] !== undefined ? this._row[field] : '');
-    return actual === expected;
-  }
-
-  // ---
-  _usesValueProperty(el) {
-    const tag = el.tagName;
-    return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || ('value' in el && tag.includes('-'));
   }
 
   // ---

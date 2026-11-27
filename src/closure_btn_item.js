@@ -14,6 +14,7 @@ override.
 | `icon="x"`      | icon text rendered before the label |
 | `disabled`      | disabled visual + skips focus |
 | `url="x"`       | when set, click submits the merged `data-*` to this URL (shared `closureFreeSubmit()` form) instead of dispatching the event. Default method: **POST**; `get`/`post`/`method=` pick another, as on `<closure-btn free>` |
+| `target="x"`    | (with `url`) name of the window or frame the answer opens in, as the `target` of a form (defaults to parent's `target`) |
 | `event="x"`     | event name to dispatch (defaults to parent's `event` then to `btn-action`) |
 | `target-id="x"` | element to receive the dispatched event (defaults to parent's `target-id` then to the parent button) |
 | `section="x"`   | section key when packaging `data-*` (defaults to parent's `section`) |
@@ -33,6 +34,23 @@ override.
   <closure-btn-item ct-role="delete" icon="🗑" data-id="42" class="red">Delete</closure-btn-item>
 </closure-btn>
 ```
+
+## Items that post to a URL
+
+An item with `url` sends the merged `data-*` to that URL. Its answer opens in
+the window named by its own `target`; an item without one takes the `target`
+of its menu, and with none in either the answer replaces the page.
+
+```html
+<closure-btn menu="Order" target="order-win" data-order="1001">
+  <closure-btn-item url="/orders/edit">Edit</closure-btn-item>
+  <closure-btn-item url="/orders/view" get>View</closure-btn-item>
+  <closure-btn-item url="/orders/print" target="print-win">Print</closure-btn-item>
+</closure-btn>
+```
+
+The three items send `order=1001`. *Edit* and *View* open in `order-win`, the
+window of the menu; *Print* opens in `print-win`, its own.
 
 ## CSS Variables
 
@@ -143,8 +161,11 @@ class ClosureBtnItem extends HTMLElement {
       a.addEventListener('click', (e) => {
         e.preventDefault();
         if (self.hasAttribute('disabled')) return;
-        // Shared free-mode form; getBtnData() keeps the parent-menu merge
-        closureFreeSubmit(self, url, 'post');
+        // Shared free-mode form; getBtnData() keeps the parent-menu merge.
+        // `target`: the window the answer opens in — its own, else the menu's
+        const menu = self.closest('closure-btn');
+        const target = self.getAttribute('target') || (menu && menu.getAttribute('target')) || '';
+        closureFreeSubmit(self, url, 'post', { target: target });
       });
     } else {
       a.addEventListener('click', (e) => {

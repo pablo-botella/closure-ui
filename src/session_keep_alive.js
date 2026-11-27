@@ -16,6 +16,7 @@ configured logoff URL.
 | `extend-url="path"`   | POST here on click to extend the **server** session; without it, the click only resets the client countdown |
 | `expire-url="path"`   | POST here when the countdown reaches zero (browser navigates to whatever the server responds); without it, only the `session-expired` event fires |
 | `activity-reset`      | also reset the countdown on any mouse / keyboard / touch activity |
+| `resume-extend`       | when the browser puts the page back from its memory (going back or forward without loading it again), do what a click on the button does (see *Behaviour*) |
 | `data-*`              | sent as form fields with both `extend-url` and `expire-url` POSTs (e.g. `data-sid="…"`) |
 
 ### `extend-url` JSON contract
@@ -56,7 +57,8 @@ Anything else → `session-extend-failed` event, **no** countdown reset.
   extend-url="/admin/keep-alive"
   expire-url="/admin/logoff"
   data-sid="abc123"
-  activity-reset></session-keep-alive>
+  activity-reset
+  resume-extend></session-keep-alive>
 ```
 
 ## CSS Variables
@@ -82,6 +84,19 @@ Anything else → `session-extend-failed` event, **no** countdown reset.
 > the countdown but do **not** call the server — only the explicit
 > button click hits `extend-url`.
 
+> **Note — a page put back from memory.** Going back or forward, the browser
+> may show the page from its memory exactly as it was, without loading it
+> again. The countdown then still points at the deadline it had when the
+> page was left: it shows what is left of that old deadline, and expires at
+> once when the deadline has passed — even if the user kept working on other
+> pages meanwhile. With `resume-extend` the element does then what a click on
+> the button does: with `extend-url` it asks the server and takes the
+> countdown it answers (or follows its redirect); without `extend-url` it
+> restarts the client countdown. If the server cannot be asked
+> (`session-extend-failed`) the countdown goes on towards the old deadline.
+> Without the attribute nothing changes, and the element listens to nothing
+> of the page.
+
 ---
 %%>*/
 class SessionKeepAlive extends HTMLElement {
@@ -106,6 +121,10 @@ class SessionKeepAlive extends HTMLElement {
         ['mousemove', 'keydown', 'touchstart'].forEach((ev) => {
           document.addEventListener(ev, this._onActivity, { passive: true });
         });
+      }
+      if (this._onPageShow) {
+        window.addEventListener('pagehide', this._onPageHide);
+        window.addEventListener('pageshow', this._onPageShow);
       }
       return;
     }
@@ -140,6 +159,16 @@ class SessionKeepAlive extends HTMLElement {
         document.addEventListener(ev, this._onActivity, { passive: true });
       });
     }
+
+    if (this.hasAttribute('resume-extend')) {
+      // Only when asked for: without the attribute nothing listens to the page.
+      // Going into the browser's memory the interval stops, so no tick with the
+      // old deadline can come before the answer on the way back.
+      this._onPageHide = (e) => { if (e.persisted) this._stopTimer(); };
+      this._onPageShow = (e) => { if (e.persisted) this._resumed(); };
+      window.addEventListener('pagehide', this._onPageHide);
+      window.addEventListener('pageshow', this._onPageShow);
+    }
   }
 
   disconnectedCallback() {
@@ -148,6 +177,10 @@ class SessionKeepAlive extends HTMLElement {
       ['mousemove', 'keydown', 'touchstart'].forEach((ev) => {
         document.removeEventListener(ev, this._onActivity);
       });
+    }
+    if (this._onPageShow) {
+      window.removeEventListener('pagehide', this._onPageHide);
+      window.removeEventListener('pageshow', this._onPageShow);
     }
   }
 
@@ -184,6 +217,23 @@ class SessionKeepAlive extends HTMLElement {
     this._timerActive = false;
   }
 
+  // Runs the interval again towards the deadline it already had (_startTimer
+  // would set a new one), and looks at the clock at once.
+  _resumeTimer() {
+    if (this._timerActive) return;
+    this._timer = setInterval(this._tick, 1000);
+    this._timerActive = true;
+    this._tick();
+  }
+
+  // `resume-extend`: the browser put the page back from its memory. The same
+  // as a click on the button; when that could not settle the countdown, it
+  // goes on towards the deadline it had.
+  async _resumed() {
+    const outcome = await this._extend();
+    if (outcome === 'failed' && this.isConnected) this._resumeTimer();
+  }
+
   _tick() {
     this._remaining = Math.round((this._targetTime - Date.now()) / 1000);
     if (this._remaining <= 0) {
@@ -209,6 +259,10 @@ class SessionKeepAlive extends HTMLElement {
     this._startTimer();
   }
 
+  // What a click on the button does. Resolves to how it ended: 'extended',
+  // 'expired' (a grant that was already exhausted), 'redirect' (denied: the
+  // browser is leaving) or 'failed' (the server could not be asked, or gave
+  // nothing to act on).
   async _extend() {
     if (this._extendUrl) {
       let data;
@@ -223,7 +277,7 @@ class SessionKeepAlive extends HTMLElement {
         data = await res.json();
       } catch (e) {
         this.dispatchEvent(new CustomEvent('session-extend-failed', { bubbles: true }));
-        return;
+        return 'failed';
       }
 
       if (data && data.ok) {
@@ -250,26 +304,27 @@ class SessionKeepAlive extends HTMLElement {
           this._render();
           this.dispatchEvent(new CustomEvent('session-expired', { bubbles: true }));
           this._logoff();
-          return;
+          return 'expired';
         }
         this._render();
         this._startTimer(); // the interval is stopped after expiry
         this.dispatchEvent(new CustomEvent('session-extended', { bubbles: true, detail: data }));
-        return;
+        return 'extended';
       }
 
       // ok=false: server may instruct the client to navigate elsewhere.
       if (data && data.redirect) {
         this._navigate(data.redirect, data.method || 'POST', data.payload || {});
-        return;
+        return 'redirect';
       }
       this.dispatchEvent(new CustomEvent('session-extend-failed', { bubbles: true, detail: data || {} }));
-      return;
+      return 'failed';
     }
 
     // No extend-url: simply reset locally.
     this._reset();
     this.dispatchEvent(new CustomEvent('session-extended', { bubbles: true }));
+    return 'extended';
   }
 
   _navigate(url, method, payload) {

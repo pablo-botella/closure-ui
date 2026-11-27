@@ -3,6 +3,8 @@
 
 <%% include-notes:signal_event.js %%>
 
+<%% include-notes:closure_history.js %%>
+
 <%% include-notes:btn_grid.js %%>
 
 <%% include-notes:update_clock_time.js %%>

@@ -69,6 +69,223 @@ function closureFreeSubmit(el, url, defaultMethod, opts) {
                  // in <body> on a download / new-tab action
 }
 
+// ---- Row binding: shared by <closure-row-viewer> and the <grid-card> of
+// <closure-data-grid>, so the same attributes mean the same in both ----
+
+// Where a field name reads: each leading ".." climbs one level, from a row of
+// a bind-rows list to the row that holds it (detail to master). `parents`
+// lists the rows above, nearest first; a level that does not exist reads
+// nothing. Returns the row to read and the name without its dots
+function closureRowField(row, field, parents) {
+  field = String(field === undefined || field === null ? '' : field);
+  var up = 0;
+  while (field.substring(0, 2) === '..') { up++; field = field.substring(2); }
+  return { row: up === 0 ? row : ((parents && parents[up - 1]) || null), name: field };
+}
+
+// The value of a field of a row, as text. A field the row lacks, or null, is
+// the empty text
+function closureRowText(row, field, parents) {
+  var at = closureRowField(row, field, parents);
+  var v = at.row ? at.row[at.name] : undefined;
+  return v === undefined || v === null ? '' : String(v);
+}
+
+// Whether a row meets a bind-show / bind-hide condition: "field" (the field
+// has a value — row values are text, so "0" and "false" count as none) or
+// "field=value"
+function closureRowMatches(row, cond, parents) {
+  var eq = cond.indexOf('=');
+  if (eq < 0) {
+    var actual = closureRowText(row, cond, parents).trim().toLowerCase();
+    return actual !== '' && actual !== '0' && actual !== 'false';
+  }
+  return closureRowText(row, cond.substring(0, eq), parents) === cond.substring(eq + 1);
+}
+
+// Shows or hides the element of a bind-show / bind-hide. keepSpace (or its
+// own bind-keep-space): hidden with `visibility`, so it keeps its place
+function closureBindVisible(el, isVisible, keepSpace) {
+  if (isVisible) {
+    el.style.display = '';
+    el.style.visibility = 'visible';
+  } else if (keepSpace || el.hasAttribute('bind-keep-space')) {
+    el.style.display = '';
+    el.style.visibility = 'hidden';
+  } else {
+    el.style.display = 'none';
+    el.style.visibility = '';
+  }
+}
+
+// The descendants of root that match selector and belong to root's own row:
+// what is inside a [bind-rows] block belongs to the rows of that list
+function closureBindOwn(root, selector) {
+  return Array.prototype.filter.call(root.querySelectorAll(selector), function(el) {
+    var block = el.parentElement ? el.parentElement.closest('[bind-rows]') : null;
+    return !block || block === root || !root.contains(block);
+  });
+}
+
+// bind-rows="field": the content of the element is the markup of ONE row of
+// that list; it is repeated for each of them, each copy bound to its row.
+// The markup is kept the first time, so the element can be bound again
+// (a viewer changes row). No list, or row null: the element is left empty.
+// The markup may come inside a <template>, the only child: there no
+// component has built itself yet, which a copy must start from.
+function closureBindLists(root, row, opts) {
+  closureBindOwn(root, '[bind-rows]').forEach(function(block) {
+    if (block._closureRowsMarkup === undefined) {
+      var only = block.children.length === 1 ? block.firstElementChild : null;
+      block._closureRowsMarkup = only && only.tagName === 'TEMPLATE' ? only.innerHTML : block.innerHTML;
+    }
+    var list = row ? row[block.getAttribute('bind-rows')] : null;
+    block.textContent = '';
+    if (!Array.isArray(list)) return;
+    // The rows of the list read the row that holds them as "..field"
+    var inner = {};
+    for (var k in (opts || {})) inner[k] = opts[k];
+    inner.parents = [row].concat((opts && opts.parents) || []);
+    list.forEach(function(item) {
+      var tpl = document.createElement('template');
+      tpl.innerHTML = block._closureRowsMarkup;
+      closureBindRow(tpl.content, item && typeof item === 'object' ? item : {}, inner);
+      block.appendChild(tpl.content);
+    });
+  });
+}
+
+// The own descendants of root (see closureBindOwn) that carry an attribute
+// with its target in the name: bind-data-<key> or abind-<what>
+function closureBindNamed(root) {
+  var found = Array.prototype.filter.call(root.querySelectorAll('*'), function(el) {
+    var attrs = el.attributes;
+    for (var i = 0; i < attrs.length; i++) {
+      var n = attrs[i].name;
+      if (n.indexOf('bind-data-') === 0 || n.indexOf('abind-') === 0) return true;
+    }
+    return false;
+  });
+  return found.filter(function(el) {
+    var block = el.parentElement ? el.parentElement.closest('[bind-rows]') : null;
+    return !block || block === root || !root.contains(block);
+  });
+}
+
+// The text of an abind-<what>-format: %1, %2… are the values, in the order
+// the fields were listed; %% is a percent sign
+function closureBindFormat(format, values) {
+  return format.replace(/%(%|\d+)/g, function(whole, n) {
+    if (n === '%') return '%';
+    var v = values[parseInt(n, 10) - 1];
+    return v === undefined ? '' : v;
+  });
+}
+
+// Writes a text as the content of an element: the `value` of a control or
+// of a component that exposes one, the text of anything else (bind-crlf: its
+// line breaks as the given separator)
+function closureBindWrite(el, val) {
+  var tag = el.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || ('value' in el && tag.indexOf('-') >= 0)) {
+    // Controls, and components that expose `.value`, take it there
+    el.value = val;
+    return;
+  }
+  var crlf = el.getAttribute('bind-crlf');
+  if (crlf && val.indexOf('\n') >= 0) {
+    // val is row data — escape it so only the author-provided
+    // crlf separator is interpreted as HTML
+    var esc = val.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    el.innerHTML = esc.replace(/\r?\n/g, crlf);
+  } else {
+    el.textContent = val;
+  }
+}
+
+// bind-data-<key>="field": the attribute data-<key> — the payload a button
+// sends. abind-text / abind-tooltip="field[,field…]": the content of the
+// element / its tooltip, the fields joined by a space or laid out by the
+// matching -format; with no value in any of its fields, nothing is shown
+function closureBindNamedAttrs(el, row, parents) {
+  Array.prototype.slice.call(el.attributes).forEach(function(attr) {
+    var name = attr.name;
+    if (name.indexOf('bind-data-') === 0) {
+      var key = name.substring(10);
+      if (key) el.setAttribute('data-' + key, closureRowText(row, attr.value.trim(), parents));
+      return;
+    }
+    if (name !== 'abind-text' && name !== 'abind-tooltip') return;
+    var values = attr.value.split(',').map(function(s) { return s.trim(); }).filter(Boolean)
+      .map(function(f) { return closureRowText(row, f, parents); });
+    var text = '';
+    if (values.some(function(v) { return v !== ''; })) {
+      var format = el.getAttribute(name + '-format');
+      text = format === null ? values.join(' ') : closureBindFormat(format, values);
+    }
+    if (name === 'abind-text') closureBindWrite(el, text);
+    else if (text) el.setAttribute('title', text);
+    else el.removeAttribute('title');
+  });
+}
+
+function closureBindRow(root, row, opts) {
+  opts = opts || {};
+
+  // Conditional visibility
+  var parents = opts.parents || [];
+  closureBindOwn(root, '[bind-show]').forEach(function(el) {
+    closureBindVisible(el, closureRowMatches(row, el.getAttribute('bind-show') || '', parents), opts.keepSpace);
+  });
+  closureBindOwn(root, '[bind-hide]').forEach(function(el) {
+    closureBindVisible(el, !closureRowMatches(row, el.getAttribute('bind-hide') || '', parents), opts.keepSpace);
+  });
+
+  closureBindOwn(root, '[bind]').forEach(function(el) {
+    var bind = el.getAttribute('bind');
+    if (!bind) return;
+    var tag = el.tagName;
+
+    // <closure-btn> / <closure-btn-item> take the fields as data-*: their
+    // payload, one attribute per field, named as the field without its ".."
+    if (tag === 'CLOSURE-BTN' || tag === 'CLOSURE-BTN-ITEM') {
+      bind.split(',').map(function(s) { return s.trim(); }).filter(Boolean).forEach(function(f) {
+        el.setAttribute('data-' + closureRowField(row, f, parents).name, closureRowText(row, f, parents));
+      });
+      return;
+    }
+    if (bind.indexOf(',') >= 0) return; // several fields: only those buttons take them
+
+    var val = closureRowText(row, bind, parents);
+    var mapId = el.getAttribute('map-data-id');
+    if (mapId) {
+      var map = document.getElementById(mapId);
+      var resolved = map ? map.resolve(val) : null;
+      if (resolved) {
+        var show = el.getAttribute('map-show') || '';
+        var display = '';
+        if (show === 'icon') display = resolved.icon || '';
+        else if (show === 'label') display = resolved.label || '';
+        else {
+          if (resolved.icon) display += resolved.icon;
+          if (resolved.label) display += (display ? ' ' : '') + resolved.label;
+        }
+        el.textContent = display || val;
+        el.style.color = resolved.color || '';
+      } else {
+        el.textContent = val;
+        el.style.color = '';
+      }
+    } else {
+      closureBindWrite(el, val);
+    }
+  });
+
+  closureBindNamed(root).forEach(function(el) { closureBindNamedAttrs(el, row, parents); });
+
+  closureBindLists(root, row, opts);
+}
+
 // ClosureMacroError: a <ss:key> / <ls:key> macro named a key that is not in the
 // storage. Callers decide what "nothing runs" means for them (skip the field,
 // skip the whole signal...) and log it.
@@ -109,6 +326,213 @@ function applyWidthRange(el) {
     if (max && max !== '-' && max !== '*') el.style.maxWidth = max;
   }
 }
+
+class ClosureHistory extends HTMLElement {
+  static _active = null;            // the instance in charge of the page
+  static _KEY = 'closureHistory';   // the member of history.state it owns
+  static _WRITE_GAP = 400;          // ms between two writes of the history
+
+  connectedCallback() {
+    this.style.display = 'none';
+    if (ClosureHistory._active && ClosureHistory._active !== this) {
+      console.warn('closure-history: only one per page; this one stays idle');
+      return;
+    }
+    ClosureHistory._active = this;
+    if (!this._pieces) {
+      this._pieces = new Map();     // name -> the element that registered it
+      this._dirty = false;
+      this._timer = 0;
+      this._lastWrite = 0;
+      this._onRegister = e => this._register(e);
+      this._onSave = e => this._save(e);
+      this._onPageShow = e => { if (e.persisted) this._resume(); };
+      this._onPageHide = () => this._flush();
+      this._onEntryChange = () => this._entryChanged();
+    }
+    this._state = this._readEntry() || {};
+    document.addEventListener('history-register', this._onRegister);
+    document.addEventListener('history-save', this._onSave);
+    window.addEventListener('pageshow', this._onPageShow);
+    window.addEventListener('pagehide', this._onPageHide);
+    window.addEventListener('popstate', this._onEntryChange);
+    window.addEventListener('hashchange', this._onEntryChange);
+    // Pieces that introduced themselves before this element existed do it again
+    document.dispatchEvent(new CustomEvent('history-ready'));
+  }
+
+  disconnectedCallback() {
+    if (ClosureHistory._active !== this) return;
+    this._flush();
+    document.removeEventListener('history-register', this._onRegister);
+    document.removeEventListener('history-save', this._onSave);
+    window.removeEventListener('pageshow', this._onPageShow);
+    window.removeEventListener('pagehide', this._onPageHide);
+    window.removeEventListener('popstate', this._onEntryChange);
+    window.removeEventListener('hashchange', this._onEntryChange);
+    ClosureHistory._active = null;
+  }
+
+  // ---
+  // The element an event was dispatched on, also across shadow boundaries
+  _source(e) {
+    const path = e.composedPath ? e.composedPath() : [];
+    return path.length ? path[0] : e.target;
+  }
+
+  // ---
+  // The name a piece gave itself. It always comes in the event: the element
+  // is never looked at, whatever its tag, its id or its attributes
+  _name(e) {
+    const name = e.detail && e.detail.name;
+    return name ? String(name) : '';
+  }
+
+  // ---
+  _clone(value) {
+    return typeof structuredClone === 'function' ? structuredClone(value) : JSON.parse(JSON.stringify(value));
+  }
+
+  // ---
+  // Compared as text: what is kept is plain data
+  _same(a, b) {
+    try { return JSON.stringify(a) === JSON.stringify(b); } catch (err) { return false; }
+  }
+
+  // ---
+  // What the current entry of the history keeps for this component, or null
+  _readEntry() {
+    let st;
+    try { st = history.state; } catch (err) { return null; }
+    const own = st && typeof st === 'object' ? st[ClosureHistory._KEY] : null;
+    return own && typeof own === 'object' && !Array.isArray(own) ? this._clone(own) : null;
+  }
+
+  // ---
+  _register(e) {
+    const piece = this._source(e);
+    const name = this._name(e);
+    if (!name) { console.warn('closure-history: history-register without detail.name'); return; }
+    const prev = this._pieces.get(name);
+    if (prev && prev !== piece && prev.isConnected) {
+      console.warn('closure-history: "' + name + '" registered twice; the last one wins');
+    }
+    this._pieces.set(name, piece);
+    this._restore(name, piece);
+  }
+
+  // ---
+  _restore(name, piece) {
+    if (!Object.prototype.hasOwnProperty.call(this._state, name)) return;
+    piece.dispatchEvent(new CustomEvent('history-restore', {
+      detail: { name, attributes: this._clone(this._state[name]) },
+    }));
+  }
+
+  // ---
+  _save(e) {
+    const name = this._name(e);
+    if (!name) { console.warn('closure-history: history-save without detail.name'); return; }
+    const attrs = e.detail ? e.detail.attributes : undefined;
+    const had = Object.prototype.hasOwnProperty.call(this._state, name);
+    if (attrs === undefined || attrs === null) {
+      if (!had) return;
+      delete this._state[name];
+    } else {
+      let copy;
+      try { copy = this._clone(attrs); } catch (err) {
+        console.warn('closure-history: the attributes of "' + name + '" cannot be kept: ' + err);
+        return;
+      }
+      if (had && this._same(this._state[name], copy)) return;
+      this._state[name] = copy;
+    }
+    this._touch();
+  }
+
+  // ---
+  // Something changed: write now when the last write is old enough, otherwise
+  // once at the end of the gap (browsers limit how often history is written).
+  _touch() {
+    this._dirty = true;
+    if (this._timer) return;
+    const wait = this._lastWrite + ClosureHistory._WRITE_GAP - Date.now();
+    if (wait <= 0) { this._flush(); return; }
+    this._timer = setTimeout(() => { this._timer = 0; this._flush(); }, wait);
+    // A reload takes the state of the entry before pagehide: while a write is
+    // pending, beforeunload writes it in time. The listener lives only that
+    // long (a permanent one can keep a page out of the browser's memory cache).
+    window.addEventListener('beforeunload', this._onPageHide);
+  }
+
+  // ---
+  // Writes what the pieces handed over into the current entry, next to
+  // whatever else the page keeps in history.state.
+  _flush() {
+    if (this._timer) { clearTimeout(this._timer); this._timer = 0; }
+    window.removeEventListener('beforeunload', this._onPageHide);
+    if (!this._dirty) return;
+    let st;
+    try { st = history.state; } catch (err) { return; }
+    if (st !== null && st !== undefined && (typeof st !== 'object' || Array.isArray(st))) {
+      // The page keeps a value of its own that cannot take a member: leave it
+      this._dirty = false;
+      console.warn('closure-history: history.state is not an object; nothing is kept');
+      return;
+    }
+    const next = Object.assign({}, st || {});
+    if (Object.keys(this._state).length) next[ClosureHistory._KEY] = this._state;
+    else delete next[ClosureHistory._KEY];
+    this._lastWrite = Date.now();
+    try {
+      history.replaceState(next, '');
+      this._dirty = false;
+    } catch (err) {
+      // Refused (written too often, a sandboxed frame): it stays pending for
+      // the next change or for pagehide
+      console.warn('closure-history: the history could not be written: ' + err);
+    }
+  }
+
+  // ---
+  // The page came back from the browser's memory: the pieces are where they
+  // were, with old data, and none registers again. Each one is told; the
+  // first that cannot refresh itself (preventDefault) has the page reloaded.
+  _resume() {
+    for (const [name, piece] of Array.from(this._pieces)) {
+      if (!piece.isConnected) { this._pieces.delete(name); continue; }
+      const ev = new CustomEvent('history-resume', { detail: { name }, cancelable: true });
+      if (!piece.dispatchEvent(ev)) {
+        this._flush(); // a reload keeps the state the entry has now, not what pagehide writes
+        location.reload();
+        return;
+      }
+    }
+  }
+
+  // ---
+  // Another entry of the same document became the current one (popstate, a
+  // fragment). An entry that keeps its own rules: the registered pieces are
+  // restored from it. One that keeps nothing gets what the pieces have now.
+  _entryChanged() {
+    const own = this._readEntry();
+    if (!own) {
+      if (Object.keys(this._state).length) { this._dirty = true; this._flush(); }
+      return;
+    }
+    if (this._same(own, this._state)) return;
+    if (this._timer) { clearTimeout(this._timer); this._timer = 0; }
+    window.removeEventListener('beforeunload', this._onPageHide);
+    this._dirty = false; // what was pending belonged to the entry that was left
+    this._state = own;
+    for (const [name, piece] of Array.from(this._pieces)) {
+      if (!piece.isConnected) { this._pieces.delete(name); continue; }
+      this._restore(name, piece);
+    }
+  }
+}
+
+customElements.define('closure-history', ClosureHistory);
 
 
 customElements.define('signal-event', class extends HTMLElement {
@@ -2476,7 +2900,8 @@ class ClosureBtn extends HTMLElement {
           a.addEventListener('click', (e) => {
             e.preventDefault();
             if (disabled || readonly) return;
-            closureFreeSubmit(self, url, 'post');
+            // `target`: the window (or frame) the answer opens in
+            closureFreeSubmit(self, url, 'post', { target: self.getAttribute('target') || '' });
           });
         } else {
           a.addEventListener('click', (e) => {
@@ -2696,8 +3121,11 @@ class ClosureBtnItem extends HTMLElement {
       a.addEventListener('click', (e) => {
         e.preventDefault();
         if (self.hasAttribute('disabled')) return;
-        // Shared free-mode form; getBtnData() keeps the parent-menu merge
-        closureFreeSubmit(self, url, 'post');
+        // Shared free-mode form; getBtnData() keeps the parent-menu merge.
+        // `target`: the window the answer opens in — its own, else the menu's
+        const menu = self.closest('closure-btn');
+        const target = self.getAttribute('target') || (menu && menu.getAttribute('target')) || '';
+        closureFreeSubmit(self, url, 'post', { target: target });
       });
     } else {
       a.addEventListener('click', (e) => {
@@ -4780,7 +5208,7 @@ class ClosureFilterBar extends HTMLElement {
 customElements.define('closure-filter-bar', ClosureFilterBar);
 
 
-['grid-col', 'grid-footer-buttons', 'g-row', 'g-col', 'g-detail', 'grid-key', 'query-definition', 'query-param',
+['grid-col', 'grid-card', 'grid-footer-buttons', 'g-row', 'g-col', 'g-detail', 'grid-key', 'query-definition', 'query-param',
  'on-no-results', 'on-fetch-error', 'grid-layout', 'filter-preset',
  'filter-set-value-btn'].forEach(tag => {
   if (!customElements.get(tag)) {
@@ -4838,6 +5266,11 @@ class ClosureDataGrid extends HTMLElement {
     'closure-data-grid .dg-tag-color-6, closure-data-grid .dg-tag-color-gray, closure-data-grid .dg-tag-color-grey { background: #f3f4f6; color: #374151; border-color: #e5e7eb; }',
     'closure-data-grid .dg-tag-color-7, closure-data-grid .dg-tag-color-pink { background: #fce7f3; color: #9d174d; border-color: #fbcfe8; }',
     'closure-data-grid .dg-no-results { padding: 20px; text-align: center; color: var(--text-muted, #6b7280); }',
+    // Card rows (<grid-card>): a list of blocks instead of a table
+    'closure-data-grid .dg-cards { position: relative; font-size: var(--dg-font-size, 13px); font-family: var(--dg-font, var(--font, sans-serif)); color: var(--dg-color, var(--text, #111827)); }',
+    'closure-data-grid .dg-cards > .dg-card { padding: var(--dg-padding, 6px 12px); padding-left: 9px; border-left: var(--dg-bar-width, 3px) solid transparent; border-bottom: 1px solid var(--dg-border, var(--border, #e5e7eb)); cursor: pointer; }',
+    'closure-data-grid .dg-cards > .dg-card:last-child { border-bottom: none; }',
+    'closure-data-grid .dg-cards > .dg-card.focused { background: var(--dg-bg-selected, #dde4fb); border-left-color: var(--dg-bar-color, var(--primary, #4f46e5)); }',
   ].join('\n');
 
   connectedCallback() {
@@ -4879,10 +5312,12 @@ class ClosureDataGrid extends HTMLElement {
     if (this._onScrollClosePanels) window.removeEventListener('scroll', this._onScrollClosePanels, { capture: true });
     if (this._masterEl && this._onMasterEvent) {
       this._masterEl.removeEventListener(this._detailEvent, this._onMasterEvent);
+      if (this._onMasterUpdate) this._masterEl.removeEventListener('row-update', this._onMasterUpdate);
       this._masterEl = null;
       this._masterDetailBound = false;
     }
     if (this._masterDetailRetry) { cancelAnimationFrame(this._masterDetailRetry); this._masterDetailRetry = 0; }
+    this._stopWatchingReturn();
     if (this._fillObserverRetry) { cancelAnimationFrame(this._fillObserverRetry); this._fillObserverRetry = 0; }
     if (this._autoFitResizeObserver) { this._autoFitResizeObserver.disconnect(); this._autoFitResizeObserver = null; }
     if (this._fillResizeObserver) { this._fillResizeObserver.disconnect(); this._fillResizeObserver = null; }
@@ -4940,6 +5375,16 @@ class ClosureDataGrid extends HTMLElement {
       eventName: el.getAttribute('event') || 'row-action',
       dataAttrs: this._readDataAttrs(el),
     }));
+    // <grid-card>: the markup of one row. With it every row is painted as
+    // that card, filled from the fields of the row, instead of as cells
+    const cardEl = Array.from(this.children).find(el => el.tagName === 'GRID-CARD');
+    this._isCard = !!cardEl;
+    // The markup may come inside a <template>, where nothing has started
+    // working: what a card holding components needs. Written directly, they
+    // build themselves inside the hidden <grid-card>, before it is read here,
+    // and every card would be a copy of something already built
+    const cardTpl = cardEl ? Array.from(cardEl.children).find(el => el.tagName === 'TEMPLATE') : null;
+    this._cardMarkup = cardTpl ? cardTpl.innerHTML : (cardEl ? cardEl.innerHTML : '');
     this._noResults = this.querySelector('on-no-results');
     this._fetchError = this.querySelector('on-fetch-error');
     this._footerButtons = Array.from(this.children)
@@ -4949,10 +5394,12 @@ class ClosureDataGrid extends HTMLElement {
         el,
       }));
 
-    // Query definition
-    const qd = this.querySelector('query-definition');
-    if (qd) {
-      this._queryDef = {
+    // Query definitions: one form per thing the grid asks the server for.
+    // `single-row` asks for one row; any other (unnamed: `data`) asks for pages.
+    this._queryDef = null;
+    this._singleRowDef = null;
+    this.querySelectorAll('query-definition').forEach(qd => {
+      const def = {
         name:   qd.getAttribute('name') || 'data',
         url:    qd.getAttribute('url') || '',
         method: (qd.getAttribute('method') || 'POST').toUpperCase(),
@@ -4964,9 +5411,9 @@ class ClosureDataGrid extends HTMLElement {
           bind:  p.getAttribute('bind') || null,
         })),
       };
-    } else {
-      this._queryDef = null;
-    }
+      if (def.name === 'single-row') { if (!this._singleRowDef) this._singleRowDef = def; }
+      else if (!this._queryDef) this._queryDef = def;
+    });
 
     // Detect mode
     this._isStatic = this.hasAttribute('static');
@@ -5010,6 +5457,15 @@ class ClosureDataGrid extends HTMLElement {
     this._allRows = Array.from(this.querySelectorAll('g-row'))
       .filter(row => !row.closest('g-detail'))
       .map(row => this._rowObjectFromElement(row));
+    // Where to start: the same <query-result offset select-index> a g-row
+    // response carries, written next to the inline rows. Applied once, by
+    // the first render.
+    this._startAt = null;
+    const meta = Array.from(this.children).find(el => el.tagName === 'QUERY-RESULT');
+    if (meta && (meta.hasAttribute('offset') || meta.hasAttribute('select-index'))) {
+      const at = (parseInt(meta.getAttribute('offset'), 10) || 0) + (parseInt(meta.getAttribute('select-index'), 10) || 0);
+      if (at > 0) this._startAt = at;
+    }
     this._filters = {};
     if (this._detailOf && this._detailKey) {
       this._rows = [];
@@ -5068,11 +5524,14 @@ class ClosureDataGrid extends HTMLElement {
   }
 
   // ---
-  _resolveParams() {
-    if (!this._queryDef) return {};
+  // The fields of a query: by default the one that asks for pages. `row` is
+  // the row a `bind="row.field"` reads from (the `single-row` query).
+  _resolveParams(def, row) {
+    def = def || this._queryDef;
+    if (!def) return {};
     const params = {};
     const ps = this.pageSize;
-    this._queryDef.params.forEach(p => {
+    def.params.forEach(p => {
       if (p.value !== null) {
         params[p.name] = p.value;
       } else if (p.bind) {
@@ -5090,6 +5549,10 @@ class ClosureDataGrid extends HTMLElement {
           
           // Multi-select arrays go to the server as CSV — wire format unchanged.
           if (v) params[p.name] = Array.isArray(v) ? v.join(',') : v;
+        } else if (ns === 'row') {
+          // A field of the row the query is about; it need not have a column
+          const v = row ? this._readPath(row, parts.slice(1).join('.')) : undefined;
+          if (v !== undefined && v !== null && v !== '') params[p.name] = v;
         } else {
           const v = this._resolveExternalBind(parts);
           if (v !== undefined && v !== null && v !== '') params[p.name] = v;
@@ -5136,8 +5599,12 @@ class ClosureDataGrid extends HTMLElement {
         this._gotoId = null; // one-shot: don't resend on later requests
         this._allRows = resp.data || [];
         this._applyFilters();
-        this._currentPage = 1;
+        // A reload in place (_reloadPage) keeps the page and the position
+        const keep = this._keepPlace;
+        this._keepPlace = null;
+        this._currentPage = keep ? Math.min(keep.page, this.totalPages) : 1;
         this._selectedIdx = 0;
+        if (keep) this._pendingFocusIdx = keep.idx;
         this._renderPage();
         this._syncColWidths();
       })
@@ -5197,8 +5664,9 @@ class ClosureDataGrid extends HTMLElement {
   }
 
   // ---
-  _readQueryResponse(response) {
-    if (!this._queryDef || this._queryDef.response !== 'g-row') return response.json();
+  _readQueryResponse(response, def) {
+    def = def || this._queryDef;
+    if (!def || def.response !== 'g-row') return response.json();
     return response.text().then(html => this._parseGRowResponse(html));
   }
 
@@ -5217,6 +5685,7 @@ class ClosureDataGrid extends HTMLElement {
       });
       if (meta.hasAttribute('eof')) result.eof = meta.getAttribute('eof') !== 'false';
       if (meta.hasAttribute('select-index')) result.select_index = parseInt(meta.getAttribute('select-index'), 10) || 0;
+      if (meta.hasAttribute('remove')) result.remove = meta.getAttribute('remove') !== 'false';
     }
     return { result, data: rows };
   }
@@ -5235,9 +5704,9 @@ class ClosureDataGrid extends HTMLElement {
   // ---
   _showError(msg) {
     this._tbody.innerHTML = '';
-    const tr = document.createElement('tr');
-    const td = document.createElement('td');
-    td.colSpan = this._cols.length;
+    const tr = document.createElement(this._isCard ? 'div' : 'tr');
+    const td = document.createElement(this._isCard ? 'div' : 'td');
+    if (!this._isCard) td.colSpan = this._cols.length;
     td.className = 'dg-no-results';
     if (this._fetchError) {
       td.innerHTML = this._fetchError.innerHTML;
@@ -5428,10 +5897,36 @@ class ClosureDataGrid extends HTMLElement {
   get totalPages() { return Math.max(1, Math.ceil(this._total / this.pageSize)); }
 
   // ---
+  // No header row: asked for with `headless`, or the rows are cards — there
+  // are no columns to title
+  _headless() { return this.hasAttribute('headless') || this._isCard; }
+
+  // ---
+  // The rows on screen: one element per row of the page — a <tr>, or a card.
+  // Always the children of the body: a card is free markup, and may hold a
+  // table of its own
+  _rowEls() { return Array.from(this._tbody.children); }
+
+  // ---
+  // The row on screen that holds `target` (where an event came from)
+  _rowElOf(target) {
+    let el = target && target.nodeType === 1 ? target : (target ? target.parentElement : null);
+    while (el && el.parentElement !== this._tbody) el = el.parentElement;
+    return el || null;
+  }
+
+  // ---
+  // The data of the row painted at position i of the page on screen
+  _rowAt(i) {
+    if (i < 0 || !this._rows) return null;
+    return (this._isDynamic ? this._rows[i] : this._rows[(this._currentPage - 1) * this.pageSize + i]) || null;
+  }
+
+  // ---
   _calcAutoPageSize() {
     const wrap = this._wrap;
     if (!wrap) return 10;
-    const theadH = this.hasAttribute('headless') ? 0 : (this._headTable ? this._headTable.offsetHeight : 32);
+    const theadH = this._headless() ? 0 : (this._headTable ? this._headTable.offsetHeight : 32);
     const paginH = this.hasAttribute('footerless') ? 0 : (this._pagination ? this._pagination.offsetHeight : 36);
     const ROW_H = 34;
     const minRows = parseInt(this.getAttribute('min-rows'), 10) || 1;
@@ -5451,8 +5946,9 @@ class ClosureDataGrid extends HTMLElement {
     this._wrap = document.createElement('div');
     this._wrap.className = 'dg-wrap';
 
-    // Head table (skipped when the grid has the `headless` attribute)
-    if (!this.hasAttribute('headless')) {
+    // Head table (skipped when the grid has the `headless` attribute, and
+    // when its rows are cards)
+    if (!this._headless()) {
       const headWrap = document.createElement('div');
       headWrap.className = 'dg-thead-wrap';
       this._headTable = document.createElement('table');
@@ -5488,10 +5984,18 @@ class ClosureDataGrid extends HTMLElement {
     this._bodyWrap = document.createElement('div');
     this._bodyWrap.className = 'dg-table-wrap';
 
-    this._bodyTable = document.createElement('table');
-    this._bodyTable.className = 'dg-table';
-    this._tbody = document.createElement('tbody');
-    this._bodyTable.appendChild(this._tbody);
+    if (this._isCard) {
+      // Cards: a plain list, one block per row. Not a table, so the markup
+      // of a card keeps the look its page gives it — a table inside included
+      this._bodyTable = document.createElement('div');
+      this._bodyTable.className = 'dg-cards';
+      this._tbody = this._bodyTable;
+    } else {
+      this._bodyTable = document.createElement('table');
+      this._bodyTable.className = 'dg-table';
+      this._tbody = document.createElement('tbody');
+      this._bodyTable.appendChild(this._tbody);
+    }
     this._bodyWrap.appendChild(this._bodyTable);
     this._wrap.appendChild(this._bodyWrap);
 
@@ -5570,6 +6074,16 @@ class ClosureDataGrid extends HTMLElement {
       this._onMasterEvent = e => this._refreshFromMaster(e.detail ? e.detail.row : null);
     }
     master.addEventListener(this._detailEvent, this._onMasterEvent);
+    if (!this._onMasterUpdate) {
+      // The row of the master was refreshed in place: read it again, staying
+      // on the position the user is on
+      this._onMasterUpdate = e => {
+        if (!e.detail || !this._masterRow || e.detail.row !== this._masterRow) return;
+        if (this._selectedIdx >= 0) this._pendingFocusIdx = this._selectedIdx;
+        this._refreshFromMaster(this._masterRow);
+      };
+    }
+    master.addEventListener('row-update', this._onMasterUpdate);
     this._refreshFromMaster(master.selectedRow || null);
   }
 
@@ -5856,6 +6370,15 @@ class ClosureDataGrid extends HTMLElement {
       pageRows = this._rows;
     } else {
       const ps = this.pageSize;
+      if (this._startAt != null) {
+        // Inline rows with a <query-result>: land on that row (one-shot)
+        const at = Math.min(this._startAt, this._rows.length - 1);
+        this._startAt = null;
+        if (at > 0 && ps > 0) {
+          this._currentPage = Math.floor(at / ps) + 1;
+          this._pendingFocusIdx = at % ps;
+        }
+      }
       const start = (this._currentPage - 1) * ps;
       pageRows = this._rows.slice(start, start + ps);
     }
@@ -5866,11 +6389,11 @@ class ClosureDataGrid extends HTMLElement {
       this._selectedIdx = -1;
       this._pendingFocusIdx = null;
       if (this._noResults) {
-        const cell = document.createElement('td');
-        cell.colSpan = this._cols.length;
+        const cell = document.createElement(this._isCard ? 'div' : 'td');
+        if (!this._isCard) cell.colSpan = this._cols.length;
         cell.className = 'dg-no-results';
         cell.innerHTML = this._noResults.innerHTML;
-        const tr = document.createElement('tr');
+        const tr = document.createElement(this._isCard ? 'div' : 'tr');
         tr.appendChild(cell);
         this._tbody.appendChild(tr);
       }
@@ -5898,7 +6421,24 @@ class ClosureDataGrid extends HTMLElement {
   }
 
   // ---
+  // A row painted as a card: the markup of <grid-card>, with the fields of
+  // the row written by the binding attributes (those of <closure-row-viewer>).
+  // It is made and bound inside a <template>, where no component works yet:
+  // each one gets its value as plain content and builds itself from it when
+  // the card reaches the page — as it would with markup sent by a server
+  _createCard(row) {
+    const card = document.createElement('div');
+    card.className = 'dg-card';
+    const tpl = document.createElement('template');
+    tpl.innerHTML = this._cardMarkup;
+    closureBindRow(tpl.content, row);
+    card.appendChild(tpl.content);
+    return card;
+  }
+
+  // ---
   _createRow(row, i) {
+    if (this._isCard) return this._createCard(row);
     const tr = document.createElement('tr');
     this._cols.forEach(col => {
       const td = document.createElement('td');
@@ -6137,8 +6677,8 @@ class ClosureDataGrid extends HTMLElement {
 
   // ---
   _selectRow(idx) {
-    const rows = Array.from(this._tbody.querySelectorAll('tr'));
-    // The "no results" placeholder is a <tr> too. Never select it: it has no
+    const rows = this._rowEls();
+    // The "no results" placeholder is a row too. Never select it: it has no
     // backing row, so row-select would fire with row: undefined and break
     // consumers (e.g. <closure-row-viewer> reading row.id). Guarding here (not
     // just the click handler) also covers the keyboard / programmatic paths.
@@ -6166,7 +6706,7 @@ class ClosureDataGrid extends HTMLElement {
 
   // ---
   _moveFocus(idx) {
-    const rows = Array.from(this._tbody.querySelectorAll('tr'));
+    const rows = this._rowEls();
     if (idx < 0 || idx >= rows.length) return false;
     this._selectRow(idx);
 
@@ -6176,6 +6716,9 @@ class ClosureDataGrid extends HTMLElement {
     const w = this._bodyWrap;
     if (rowTop < w.scrollTop) w.scrollTop = rowTop;
     else if (rowBot > w.scrollTop + w.clientHeight) w.scrollTop = rowBot - w.clientHeight;
+    // Cards flow with the page, and a page of them can be taller than the
+    // window: bring into view the one the keyboard moved to
+    if (this._isCard && this._scrollMode === 'continuous') rows[idx].scrollIntoView({ block: 'nearest' });
     return true;
   }
 
@@ -6342,7 +6885,7 @@ class ClosureDataGrid extends HTMLElement {
       console.warn('<closure-data-grid>: scroll="continuous" is ignored because max-rows bounds the grid; using window mode.');
     }
     this._scrollMode = 'window';
-    const theadH = this.hasAttribute('headless') ? 0 : (this._headTable ? this._headTable.offsetHeight : 32);
+    const theadH = this._headless() ? 0 : (this._headTable ? this._headTable.offsetHeight : 32);
     const paginH = this.hasAttribute('footerless') ? 0 : (this._pagination ? this._pagination.offsetHeight : 36);
     const ROW_H = 34;
     this._wrap.style.maxHeight = (theadH + (ROW_H * maxRows) + paginH) + 'px';
@@ -6352,7 +6895,7 @@ class ClosureDataGrid extends HTMLElement {
   _setAutoHeight() {
     const wrap = this._wrap;
     const top = wrap.getBoundingClientRect().top + window.scrollY;
-    const theadH = this.hasAttribute('headless') ? 0 : (this._headTable ? this._headTable.offsetHeight : 32);
+    const theadH = this._headless() ? 0 : (this._headTable ? this._headTable.offsetHeight : 32);
     const paginH = this.hasAttribute('footerless') ? 0 : (this._pagination ? this._pagination.offsetHeight : 36);
     const ROW_H = 34;
     const minRows = parseInt(this.getAttribute('min-rows'), 10) || 1;
@@ -6462,11 +7005,25 @@ class ClosureDataGrid extends HTMLElement {
   _setupEvents() {
     // Click on body
     this._tbody.addEventListener('click', e => {
-      const row = e.target.closest('tr');
+      const row = this._rowElOf(e.target);
       if (!row) return;
-      const rows = Array.from(this._tbody.querySelectorAll('tr'));
-      this._selectRow(rows.indexOf(row));
+      this._selectRow(this._rowEls().indexOf(row));
     });
+
+    // A card can hold actions that take the user to another window — a form
+    // or a link with a `target` — marked `return-refresh`, as inside a
+    // <closure-row-viewer>: a form tells when it is submitted, anything else
+    // when it is clicked, and the row asked for again is the one of its card
+    if (this._isCard) {
+      this._tbody.addEventListener('submit', e => {
+        const form = e.target;
+        if (form && form.hasAttribute && form.hasAttribute('return-refresh')) this._expectReturnOf(form);
+      });
+      this._tbody.addEventListener('click', e => {
+        const el = e.target && e.target.closest ? e.target.closest('[return-refresh]') : null;
+        if (el && el.tagName !== 'FORM' && this._tbody.contains(el)) this._expectReturnOf(el);
+      });
+    }
 
     // Close action menus on click outside (kept as a named handler so
     // disconnectedCallback can remove it)
@@ -6507,7 +7064,7 @@ class ClosureDataGrid extends HTMLElement {
     // Keyboard
     this._onDocKeydown = e => {
       if (!this.contains(document.activeElement) && document.activeElement !== this) return;
-      const rows = this._tbody.querySelectorAll('tr');
+      const rows = this._rowEls();
       if (!rows.length) return;
       const lastIdx = rows.length - 1;
 
@@ -6593,10 +7150,9 @@ class ClosureDataGrid extends HTMLElement {
 
     // Double click
     this._tbody.addEventListener('dblclick', e => {
-      const row = e.target.closest('tr');
+      const row = this._rowElOf(e.target);
       if (!row) return;
-      const rows = Array.from(this._tbody.querySelectorAll('tr'));
-      this._selectRow(rows.indexOf(row));
+      this._selectRow(this._rowEls().indexOf(row));
       for (const gk of this._keys) {
         if (gk.keys.some(k => k.includes('dblclick'))) {
           this._executeAction(gk);
@@ -6729,14 +7285,174 @@ class ClosureDataGrid extends HTMLElement {
     // leave _allRows untouched and the edit would vanish on the next
     // _applyFilters() / _renderPage() (page change, search, etc.).
     const merged = Object.assign(this._rows[absIdx], data);
-    const oldTr = this._tbody.querySelectorAll('tr')[i];
-    if (!oldTr) return;
-    const wasFocused = oldTr.classList.contains('focused');
-    const tr = this._createRow(merged, i);
+    this._repaintRow(i);
+    this._announceRowUpdate(merged, (this._currentPage - 1) * this.pageSize + i);
+  }
+
+  // ---
+  // Paints again the <tr> of a row of the page on screen (i: its index in
+  // the page), keeping its focus mark.
+  _repaintRow(i) {
+    const row = this._isDynamic ? this._rows[i] : this._rows[(this._currentPage - 1) * this.pageSize + i];
+    const oldTr = this._rowEls()[i];
+    if (!row || !oldTr || oldTr.querySelector('.dg-no-results')) return;
+    const tr = this._createRow(row, i);
     tr.addEventListener('click', () => this._selectRow(i));
-    if (wasFocused) tr.classList.add('focused');
+    if (oldTr.classList.contains('focused')) tr.classList.add('focused');
+    if (this._isCard) {
+      // A card painted again keeps open (or closed) what the user left so
+      const open = Array.from(oldTr.querySelectorAll('details')).map(d => d.open);
+      tr.querySelectorAll('details').forEach((d, n) => { if (n < open.length) d.open = open[n]; });
+    }
     oldTr.replaceWith(tr);
     this._syncColWidths(); // re-fit columns (auto-fit only; no-op otherwise)
+  }
+
+  // ---
+  // Tells whoever shows a row (a <closure-row-viewer>, a detail grid) that its
+  // data changed in place: the object is the same one, so they cannot notice
+  // by themselves. index is absolute, as in row-select.
+  _announceRowUpdate(row, index) {
+    this.dispatchEvent(new CustomEvent('row-update', { detail: { row, index }, bubbles: true }));
+  }
+
+  // ---
+  // Asks the server for one row, with the `single-row` query, and puts the
+  // answer in its place: the row that comes replaces it; `remove` takes it off
+  // the list; an answer with neither, or a request that fails, leaves it as it
+  // is. Without an argument it is the selected row. A grid with no
+  // `single-row` query does nothing.
+  refreshRow(row) {
+    const def = this._singleRowDef;
+    row = row || this.selectedRow;
+    if (!def || !def.url || !row || !this._rows || this._rows.indexOf(row) < 0) return;
+    const params = this._resolveParams(def, row);
+    const fetchOpts = { method: def.method, credentials: 'same-origin' };
+    let fetchUrl = def.url;
+    if (def.method === 'GET') {
+      const qs = new URLSearchParams(params).toString();
+      if (qs) fetchUrl += (fetchUrl.includes('?') ? '&' : '?') + qs;
+    } else {
+      fetchOpts.headers = { 'Content-Type': 'application/x-www-form-urlencoded' };
+      fetchOpts.body = new URLSearchParams(params).toString();
+    }
+    fetch(fetchUrl, fetchOpts)
+      .then(r => {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return this._readQueryResponse(r, def);
+      })
+      .then(resp => {
+        if (!resp) return;
+        if (resp.error) { console.warn('single-row: ' + resp.error); return; }
+        const fresh = (resp.data || [])[0];
+        if (fresh && typeof fresh === 'object') this._replaceRow(row, fresh);
+        else if (resp.result && resp.result.remove) this._removeRow(row);
+      })
+      .catch(err => console.error('single-row fetch error:', err));
+  }
+
+  // ---
+  // Puts new data in a row, in place: static rows are shared with _allRows,
+  // and whoever shows the row holds this very object.
+  _replaceRow(row, fresh) {
+    const idx = this._rows.indexOf(row);
+    if (idx < 0) return; // not among the rows any more (the user went to another page)
+    Object.keys(row).forEach(k => { if (!(k in fresh)) delete row[k]; });
+    Object.assign(row, fresh);
+    const first = (this._currentPage - 1) * this.pageSize;
+    const i = this._isDynamic ? idx : idx - first;
+    if (i >= 0 && i < this._tbody.children.length) this._repaintRow(i);
+    this._announceRowUpdate(row, this._isDynamic ? first + idx : idx);
+  }
+
+  // ---
+  // Takes a row off the list. With every row here it is dropped and the page
+  // painted again; a dynamic grid cannot (the page would be one row short), so
+  // it asks for its page again. The user stays on the same page and position.
+  _removeRow(row) {
+    if (this._rows.indexOf(row) < 0) return;
+    if (this._isDynamic) { this._reloadPage(); return; }
+    const all = this._allRows.indexOf(row);
+    if (all >= 0) this._allRows.splice(all, 1);
+    const keep = this._selectedIdx;
+    this._applyFilters();
+    if (this._currentPage > this.totalPages) this._currentPage = this.totalPages;
+    this._pendingFocusIdx = keep < 0 ? 0 : keep;
+    this._renderPage();
+    this._syncColWidths();
+  }
+
+  // ---
+  // Asks again for what the grid shows, staying on the page and the position
+  // the user is on (refresh() goes back to the first page). An inline grid has
+  // nobody to ask: its rows came written in the page.
+  _reloadPage() {
+    const idx = this._selectedIdx < 0 ? 0 : this._selectedIdx;
+    if (this._isDynamic) {
+      this._pendingFocusIdx = idx;
+      this._fetchDynamic();
+    } else if (this._isStaticByRequest) {
+      this._keepPlace = { page: this._currentPage, idx };
+      this._fetchStatic();
+    }
+  }
+
+  // ---
+  // An action that takes the user to another window was launched for a row
+  // (a <closure-row-viewer> calls this for its `return-refresh` children).
+  // When this window gets the user back, that row is asked for again (mode
+  // "row") or the whole page is (mode "all").
+  expectReturn(mode, row) {
+    // Rows bundled in the row of a master cannot be asked for alone: the row
+    // of the master is the unit that comes from the server
+    if (this._detailOf && this._detailRows && this._masterEl && typeof this._masterEl.expectReturn === 'function') {
+      this._masterEl.expectReturn(mode, this._masterRow);
+      return;
+    }
+    row = row || this.selectedRow;
+    if (mode !== 'all' && !row) return;
+    if (!this._return) this._return = { all: false, rows: [], away: false };
+    if (mode === 'all') this._return.all = true;
+    else if (this._return.rows.indexOf(row) < 0) this._return.rows.push(row);
+    if (this._onAway) return; // already watching
+    this._onAway = () => { if (this._return) this._return.away = true; };
+    this._onBack = () => { if (this._return && this._return.away && !document.hidden) this._returned(); };
+    this._onVisibility = () => { if (document.hidden) this._onAway(); else this._onBack(); };
+    window.addEventListener('blur', this._onAway);
+    window.addEventListener('focus', this._onBack);
+    document.addEventListener('visibilitychange', this._onVisibility);
+  }
+
+  // ---
+  // An element marked `return-refresh` inside a card was used: the row that
+  // went out is the one of that card
+  _expectReturnOf(el) {
+    const row = this._rowAt(this._rowEls().indexOf(this._rowElOf(el)));
+    if (row) this.expectReturn(el.getAttribute('return-refresh') === 'all' ? 'all' : 'row', row);
+  }
+
+  // ---
+  _stopWatchingReturn() {
+    if (!this._onAway) return;
+    window.removeEventListener('blur', this._onAway);
+    window.removeEventListener('focus', this._onBack);
+    document.removeEventListener('visibilitychange', this._onVisibility);
+    this._onAway = this._onBack = this._onVisibility = null;
+  }
+
+  // ---
+  // The user is back in this window after an action launched from it
+  _returned() {
+    const pending = this._return;
+    this._return = null;
+    this._stopWatchingReturn();
+    if (!pending) return;
+    if (pending.all) {
+      if (this._isDynamic || this._isStaticByRequest) this._reloadPage();
+      else location.reload(); // the rows came written in the page
+      return;
+    }
+    pending.rows.forEach(row => this.refreshRow(row));
   }
 
   // ---
@@ -6795,6 +7511,7 @@ class ClosureRowViewer extends HTMLElement {
     if (this._grid && this._onRowSelect) {
       this._grid.removeEventListener('row-select', this._onRowSelect);
       this._grid.removeEventListener('row-focus', this._onRowFocus);
+      this._grid.removeEventListener('row-update', this._onRowUpdate);
     }
   }
 
@@ -6802,13 +7519,37 @@ class ClosureRowViewer extends HTMLElement {
     if (!this._grid || !this._onRowSelect) return;
     this._grid.addEventListener('row-select', this._onRowSelect);
     this._grid.addEventListener('row-focus', this._onRowFocus);
+    this._grid.addEventListener('row-update', this._onRowUpdate);
   }
 
   _init() {
     // Save original children as template
     this._template = this.innerHTML;
     this._bindTarget();
+    this._watchActions();
     this._scheduleUpdate();
+  }
+
+  // ---
+  // Children marked `return-refresh` are actions that take the user to
+  // another window: a form when it is submitted, anything else (a link with
+  // a `target`) when it is clicked. The grid is told which row went out, and
+  // asks for it again when the user comes back to this window.
+  _watchActions() {
+    this.addEventListener('submit', e => {
+      const form = e.target;
+      if (form && form.hasAttribute && form.hasAttribute('return-refresh')) this._expectReturn(form);
+    });
+    this.addEventListener('click', e => {
+      const el = e.target && e.target.closest ? e.target.closest('[return-refresh]') : null;
+      if (el && el.tagName !== 'FORM' && this.contains(el)) this._expectReturn(el);
+    });
+  }
+
+  // ---
+  _expectReturn(el) {
+    if (!this._row || !this._grid || typeof this._grid.expectReturn !== 'function') return;
+    this._grid.expectReturn(el.getAttribute('return-refresh') === 'all' ? 'all' : 'row', this._row);
   }
 
   _bindTarget() {
@@ -6820,6 +7561,8 @@ class ClosureRowViewer extends HTMLElement {
 
     this._onRowSelect = e => this._setRow(e.detail.row || null);
     this._onRowFocus = e => this._setRow(e.detail.row || null);
+    // The data of the row on show changed in place (same object): paint it again
+    this._onRowUpdate = e => { if (e.detail && e.detail.row === this._row) this._scheduleUpdate(); };
     this._attachGridListeners();
 
     // Sync with current selection if grid already has one
@@ -6830,79 +7573,20 @@ class ClosureRowViewer extends HTMLElement {
 
   _update() {
     this.style.visibility = 'visible';
-    this.querySelectorAll('[bind]').forEach(el => {
+    const keepSpace = this.hasAttribute('keep-space');
+    // Only the elements of the row on show: what a bind-rows list holds is
+    // the markup of its own rows, and is written when the list is
+    closureBindOwn(this, '[bind]').concat(closureBindNamed(this)).forEach(el => {
       el.style.visibility = this._row ? 'visible' : 'hidden';
     });
-    this.querySelectorAll('[bind-show]').forEach(el => {
-      if (!this._row) this._setConditionalVisibility(el, false);
-    });
-    this.querySelectorAll('[bind-hide]').forEach(el => {
-      if (!this._row) this._setConditionalVisibility(el, false);
-    });
-    if (!this._row) return;
-
-    // Conditional visibility: bind-show / bind-hide with "field" or "field=value".
-    this.querySelectorAll('[bind-show]').forEach(el => {
-      this._setConditionalVisibility(el, this._matchesBindCondition(el.getAttribute('bind-show') || ''));
-    });
-    this.querySelectorAll('[bind-hide]').forEach(el => {
-      this._setConditionalVisibility(el, !this._matchesBindCondition(el.getAttribute('bind-hide') || ''));
-    });
-
-    // Update spans/labels with bind (skip closure-btn elements — they use bind for data attributes only)
-    this.querySelectorAll('[bind]').forEach(el => {
-      const tag = el.tagName.toLowerCase();
-      if (tag === 'closure-btn' || tag === 'closure-btn-item') return;
-      const field = el.getAttribute('bind');
-      if (!field) return;
-
-      // Single field → display value
-      if (!field.includes(',')) {
-        const val = this._row[field] !== undefined ? String(this._row[field]) : '';
-        const mapId = el.getAttribute('map-data-id');
-        if (mapId) {
-          const map = document.getElementById(mapId);
-          const resolved = map ? map.resolve(val) : null;
-          if (resolved) {
-            const show = el.getAttribute('map-show') || '';
-            let display = '';
-            if (show === 'icon') display = resolved.icon || '';
-            else if (show === 'label') display = resolved.label || '';
-            else {
-              if (resolved.icon) display += resolved.icon;
-              if (resolved.label) display += (display ? ' ' : '') + resolved.label;
-            }
-            el.textContent = display || val;
-            if (resolved.color) el.style.color = resolved.color;
-            else el.style.color = '';
-          } else {
-            el.textContent = val;
-            el.style.color = '';
-          }
-        } else if (this._usesValueProperty(el)) {
-          el.value = val;
-        } else {
-          const crlf = el.getAttribute('bind-crlf');
-          if (crlf && val.includes('\n')) {
-            // val is row data — escape it so only the author-provided
-            // crlf separator is interpreted as HTML
-            const esc = val.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-            el.innerHTML = esc.replace(/\r?\n/g, crlf);
-          } else {
-            el.textContent = val;
-          }
-        }
-      }
-    });
-
-    // Update closure-btn / closure-btn-item data attributes from bind
-    this.querySelectorAll('closure-btn[bind], closure-btn-item[bind]').forEach(el => {
-      const fields = el.getAttribute('bind').split(',').map(s => s.trim()).filter(Boolean);
-      fields.forEach(f => {
-        const val = this._row[f] !== undefined ? String(this._row[f]) : '';
-        el.setAttribute('data-' + f, val);
-      });
-    });
+    if (!this._row) {
+      closureBindOwn(this, '[bind-show], [bind-hide]').forEach(el => closureBindVisible(el, false, keepSpace));
+      closureBindLists(this, null); // no row: its lists have no rows
+      return;
+    }
+    // The fields of the row, written by the shared binding (the same one
+    // paints the cards of a grid)
+    closureBindRow(this, this._row, { keepSpace });
   }
 
   // ---
@@ -6920,42 +7604,6 @@ class ClosureRowViewer extends HTMLElement {
       this._pendingUpdate = false;
       this._update();
     });
-  }
-
-  // ---
-  _setConditionalVisibility(el, isVisible) {
-    const keepSpace = this.hasAttribute('keep-space') || el.hasAttribute('bind-keep-space');
-    if (isVisible) {
-      el.style.display = '';
-      el.style.visibility = 'visible';
-    } else if (keepSpace) {
-      el.style.display = '';
-      el.style.visibility = 'hidden';
-    } else {
-      el.style.display = 'none';
-      el.style.visibility = '';
-    }
-  }
-
-  // ---
-  _matchesBindCondition(cond) {
-    const eq = cond.indexOf('=');
-    if (eq < 0) {
-      // Same truthiness as the grid: row values are strings, so "0" and
-      // "false" must count as falsy
-      const actual = String(this._row[cond] !== undefined ? this._row[cond] : '').trim().toLowerCase();
-      return actual !== '' && actual !== '0' && actual !== 'false';
-    }
-    const field = cond.substring(0, eq);
-    const expected = cond.substring(eq + 1);
-    const actual = String(this._row[field] !== undefined ? this._row[field] : '');
-    return actual === expected;
-  }
-
-  // ---
-  _usesValueProperty(el) {
-    const tag = el.tagName;
-    return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || ('value' in el && tag.includes('-'));
   }
 
   // ---
@@ -8738,6 +9386,10 @@ class SessionKeepAlive extends HTMLElement {
           document.addEventListener(ev, this._onActivity, { passive: true });
         });
       }
+      if (this._onPageShow) {
+        window.addEventListener('pagehide', this._onPageHide);
+        window.addEventListener('pageshow', this._onPageShow);
+      }
       return;
     }
     this._initialized = true;
@@ -8771,6 +9423,16 @@ class SessionKeepAlive extends HTMLElement {
         document.addEventListener(ev, this._onActivity, { passive: true });
       });
     }
+
+    if (this.hasAttribute('resume-extend')) {
+      // Only when asked for: without the attribute nothing listens to the page.
+      // Going into the browser's memory the interval stops, so no tick with the
+      // old deadline can come before the answer on the way back.
+      this._onPageHide = (e) => { if (e.persisted) this._stopTimer(); };
+      this._onPageShow = (e) => { if (e.persisted) this._resumed(); };
+      window.addEventListener('pagehide', this._onPageHide);
+      window.addEventListener('pageshow', this._onPageShow);
+    }
   }
 
   disconnectedCallback() {
@@ -8779,6 +9441,10 @@ class SessionKeepAlive extends HTMLElement {
       ['mousemove', 'keydown', 'touchstart'].forEach((ev) => {
         document.removeEventListener(ev, this._onActivity);
       });
+    }
+    if (this._onPageShow) {
+      window.removeEventListener('pagehide', this._onPageHide);
+      window.removeEventListener('pageshow', this._onPageShow);
     }
   }
 
@@ -8815,6 +9481,23 @@ class SessionKeepAlive extends HTMLElement {
     this._timerActive = false;
   }
 
+  // Runs the interval again towards the deadline it already had (_startTimer
+  // would set a new one), and looks at the clock at once.
+  _resumeTimer() {
+    if (this._timerActive) return;
+    this._timer = setInterval(this._tick, 1000);
+    this._timerActive = true;
+    this._tick();
+  }
+
+  // `resume-extend`: the browser put the page back from its memory. The same
+  // as a click on the button; when that could not settle the countdown, it
+  // goes on towards the deadline it had.
+  async _resumed() {
+    const outcome = await this._extend();
+    if (outcome === 'failed' && this.isConnected) this._resumeTimer();
+  }
+
   _tick() {
     this._remaining = Math.round((this._targetTime - Date.now()) / 1000);
     if (this._remaining <= 0) {
@@ -8840,6 +9523,10 @@ class SessionKeepAlive extends HTMLElement {
     this._startTimer();
   }
 
+  // What a click on the button does. Resolves to how it ended: 'extended',
+  // 'expired' (a grant that was already exhausted), 'redirect' (denied: the
+  // browser is leaving) or 'failed' (the server could not be asked, or gave
+  // nothing to act on).
   async _extend() {
     if (this._extendUrl) {
       let data;
@@ -8854,7 +9541,7 @@ class SessionKeepAlive extends HTMLElement {
         data = await res.json();
       } catch (e) {
         this.dispatchEvent(new CustomEvent('session-extend-failed', { bubbles: true }));
-        return;
+        return 'failed';
       }
 
       if (data && data.ok) {
@@ -8881,26 +9568,27 @@ class SessionKeepAlive extends HTMLElement {
           this._render();
           this.dispatchEvent(new CustomEvent('session-expired', { bubbles: true }));
           this._logoff();
-          return;
+          return 'expired';
         }
         this._render();
         this._startTimer(); // the interval is stopped after expiry
         this.dispatchEvent(new CustomEvent('session-extended', { bubbles: true, detail: data }));
-        return;
+        return 'extended';
       }
 
       // ok=false: server may instruct the client to navigate elsewhere.
       if (data && data.redirect) {
         this._navigate(data.redirect, data.method || 'POST', data.payload || {});
-        return;
+        return 'redirect';
       }
       this.dispatchEvent(new CustomEvent('session-extend-failed', { bubbles: true, detail: data || {} }));
-      return;
+      return 'failed';
     }
 
     // No extend-url: simply reset locally.
     this._reset();
     this.dispatchEvent(new CustomEvent('session-extended', { bubbles: true }));
+    return 'extended';
   }
 
   _navigate(url, method, payload) {

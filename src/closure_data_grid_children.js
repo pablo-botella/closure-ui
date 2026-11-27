@@ -11,13 +11,14 @@ trivial implementation and are always loaded as a set.
 | Tag | Purpose |
 |---|---|
 | `<grid-col>`         | column descriptor: `name`, `label`, `width`, `align`, `fill`, `type`, `map-data-id` |
+| `<grid-card>`        | the markup of one row (inside a `<template>`), filled from its fields with the binding attributes of `<closure-row-viewer>`: with it the grid paints every row as that card instead of as cells |
 | `<grid-footer-buttons>` | extra pagination footer buttons; `side="left|center|right"` |
 | `<grid-key>`         | per-row identity (text content is one or more `name`s, comma-separated) |
 | `<grid-layout>`      | layout container: hoists `page-size`, `min-rows`, `max-rows`, `scroll="window\|continuous"` onto the grid (child value wins) |
 | `<g-row>`            | one row of inline data (contains `<g-col>` cells) |
 | `<g-col>`            | one cell inside `<g-row>`; `name="…"` matches a `<grid-col>` |
 | `<g-detail>`         | nested detail rows inside a `<g-row>`; `name="…"` becomes an array field |
-| `<query-definition>` | dynamic-mode endpoint: `url`, default headers / params |
+| `<query-definition>` | dynamic-mode endpoint: `url`, default headers / params. With `name="single-row"`, the query that asks for one row |
 | `<query-param>`      | maps an external value (filter, etc.) into a query parameter |
 | `<on-no-results>`    | markup rendered when the grid has no rows |
 | `<on-fetch-error>`   | markup rendered on dynamic-mode fetch failure |
@@ -67,7 +68,7 @@ trivial implementation and are always loaded as a set.
 ---
 %%>*/
 
-['grid-col', 'grid-footer-buttons', 'g-row', 'g-col', 'g-detail', 'grid-key', 'query-definition', 'query-param',
+['grid-col', 'grid-card', 'grid-footer-buttons', 'g-row', 'g-col', 'g-detail', 'grid-key', 'query-definition', 'query-param',
  'on-no-results', 'on-fetch-error', 'grid-layout', 'filter-preset',
  'filter-set-value-btn'].forEach(tag => {
   if (!customElements.get(tag)) {

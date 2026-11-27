@@ -89,6 +89,22 @@ fields so they survive. A GET with **no fields at all** (and no
 `opts.target`) skips the form entirely and navigates plainly — no bare
 `?` is appended to the url.
 
+## `closureBindRow(root, row, opts?)`
+
+Writes the fields of `row` onto the descendants of `root` that carry binding
+attributes. It is the one implementation behind `<closure-row-viewer>` and
+the `<grid-card>` of `<closure-data-grid>`, so both read the same attributes
+the same way: `bind`, `bind-show`, `bind-hide`, `bind-keep-space`,
+`bind-crlf`, `map-data-id`, `map-show`, `bind-rows`, `bind-data-*`,
+`abind-text` and `abind-tooltip` — described under `<closure-row-viewer>`.
+
+`root` is an element or a `DocumentFragment`; it need not be in the page.
+`opts.keepSpace` hides every `bind-show` / `bind-hide` with `visibility`
+instead of `display`. A field the row lacks, or `null`, is the empty text.
+`opts.parents` lists the rows above `row`, nearest first: they are what a
+field name written `..field` reads. The rows of a `bind-rows` list get
+theirs without being asked — the row that holds the list.
+
 ---
 
 # `<signal-event>`
@@ -255,6 +271,149 @@ injected by buttons, with the live storage and event log.
 > ⚠️ A delayed signal is **lost if the page navigates** (a `redirect` /
 > full reload clears the timer). Use `delay` only for in-page signals; for
 > something that must survive navigation, schedule it server-side.
+
+---
+
+# `<closure-history>`
+
+Remembers, for each entry of the browser history, where every piece of the
+page was — so coming back to the page (the back / forward buttons, a reload)
+puts each piece where the user left it. Renders nothing (`display: none`).
+
+It is **aseptic**: it knows nothing about grids, tabs or any other component,
+and never interprets what it keeps. Each piece hands over a set of
+attributes under its own name; when the page comes back, each piece gets its
+own set and decides what to do with it. It keeps **state, never data**: the
+rows, fields and content of a page are always fetched again.
+
+Underneath it is `history.replaceState` (write) and `history.state` (read):
+no entry is added to the history, the URL does not change and nothing
+reaches the server.
+
+## The state of an entry
+
+One object per history entry, a member per piece, each with the attributes
+that piece chose — the pieces need not resemble one another:
+
+```
+{
+  users:  { page: 3, row: 7 },
+  search: { q: "smith" },
+  tabs:   { active: "settings" }
+}
+```
+
+It lives under the single key `closureHistory` of `history.state`, so
+whatever a page keeps there on its own is left alone.
+
+## Attributes
+
+None.
+
+## Events
+
+The whole conversation is events: a piece never calls `<closure-history>` and
+need not know whether there is one. With no `<closure-history>` in the page
+the events of the pieces reach nobody and nothing happens. And
+`<closure-history>` never looks for the pieces: it knows only those that
+introduced themselves, by the name they gave, and talks only to them.
+
+| Event | From → to | `detail` | When |
+|---|---|---|---|
+| `history-register` | piece → history (must **bubble**) | `{ name }` | the piece introduces itself |
+| `history-restore`  | history → piece (does not bubble) | `{ name, attributes }` | inside that same `history-register`, when the entry holds attributes of that piece — the piece has them before it paints. Also when the user moves to another entry of the same document |
+| `history-save`     | piece → history (must **bubble**) | `{ name, attributes }` | something of the piece changed. The attributes **replace** the ones kept under that name; `attributes: null` forgets the piece |
+| `history-resume`   | history → every registered piece (does not bubble, **cancelable**) | `{ name }` | the browser restored the page from memory instead of loading it again (see *Behaviour*) |
+| `history-ready`    | history → `document` | none | `<closure-history>` is in charge: pieces that introduced themselves before it existed do it again |
+
+The name of a piece always comes in the event, as `detail.name`; an event
+without it is refused (`console.warn`). `<closure-history>` does not read the
+tag, the `id` or any attribute of the element that dispatched it. Names are
+unique within a page.
+
+`attributes` is any value the browser can clone (plain objects, arrays,
+strings, numbers, booleans…) — what goes in `history-save` is what comes back
+in `history-restore`.
+
+## Example
+
+Any element can be a client, of this library or not; the page's own script
+does by hand what a component would do by itself:
+
+```html
+<closure-history></closure-history>
+
+<input id="volume" type="range" min="0" max="10" value="5">
+
+<script>
+  const volume = document.getElementById('volume');
+
+  // 1. be ready to receive, then introduce yourself
+  volume.addEventListener('history-restore', e => {
+    volume.value = e.detail.attributes.level;
+  });
+  volume.dispatchEvent(new CustomEvent('history-register',
+    { bubbles: true, detail: { name: 'volume' } }));
+
+  // 2. hand over what is yours whenever it changes
+  volume.addEventListener('change', () => {
+    volume.dispatchEvent(new CustomEvent('history-save',
+      { bubbles: true, detail: { name: 'volume', attributes: { level: volume.value } } }));
+  });
+</script>
+```
+
+Move the slider, go to another page and come back, or reload: the slider is
+where it was.
+
+## Behaviour
+
+> **Note — who rules.** What is kept belongs to **one entry** of the
+> history. Coming back to an entry that kept something, the entry rules.
+> Any new request — a link, a form, a redirect — is a new entry that kept
+> nothing: there the page rules, and no `history-restore` is dispatched.
+
+> **Note — subscribing is the piece's decision.** Each element looks at its
+> own attributes and decides whether to register, and under which name.
+> `<closure-history>` inspects no tag and searches nothing in the page: an
+> element that does not register does not exist for it. The only event not
+> addressed to a registered piece is `history-ready`, the announcement that
+> `<closure-history>` is there.
+
+> **Note — one per page, placed first.** Put it at the top of `<body>`, before
+> the pieces: a piece that registers then gets its `history-restore` inside
+> its own `history-register`, before it paints. It also works when it arrives
+> later (it announces itself with `history-ready`), but a piece that already
+> painted has to move. A second `<closure-history>` in the page stays idle
+> (`console.warn`).
+
+> **Note — listen before you register.** `history-restore` is dispatched
+> synchronously while `history-register` is still being dispatched, so the
+> listener of the piece must already be there.
+
+> **Note — writes are grouped.** Browsers limit how often the history can be
+> written. A change is written at once when the last write was more than
+> 400 ms ago; otherwise the changes of that interval go in one write at its
+> end. Whatever is pending is written when the page is left or reloaded
+> (`pagehide`, and `beforeunload` while a write is pending).
+
+> **Note — restored from memory.** Going back, the browser may put the page
+> back from memory exactly as it was, running no script: the pieces are
+> where they were but show **old data**, and none registers again.
+> `<closure-history>` then dispatches `history-resume` to every registered
+> piece, so each one refreshes itself. A piece that cannot (its data came
+> written in the page) calls `preventDefault()`, and `<closure-history>`
+> reloads the page — the pieces then register and get their
+> `history-restore` as on any load.
+
+> **Note — entries of the same document.** Following a fragment link
+> (`#section`) or a page's own `pushState` creates an entry without loading
+> anything. A new entry that holds nothing gets what the pieces have now;
+> going back to one that holds its own, that one rules and the registered
+> pieces get `history-restore`.
+
+> **Note:** attributes the browser cannot clone (a function, a DOM node) are
+> refused with a `console.warn` and what was kept stays as it was.
 
 ---
 
@@ -1277,6 +1436,7 @@ them); button state and form validation stay with the surrounding closure / form
 | `free`                  | bypass target-closure: click POSTs to `url` (or fires the event itself) |
 | `url="x"`               | (with `free`) destination URL of the auto-generated form |
 | `get` / `post` / `method="get\|post"` | (with `free`) pick the submit method — quick boolean attributes win over `method=`. Default: **POST** (an action button). On GET the `data-*` fields become the query string, replacing any query on `url` (add `preserve` to keep it) |
+| `target="x"`            | (with `free` and `url`) name of the window or frame the answer opens in, as the `target` of a form (`_blank`, or a name of your own to reuse one window) |
 | `event="x"`             | event name to dispatch (default `btn-action`) |
 | `target-id="x"`         | element to receive the dispatched event (default: self) |
 | `target-selector="css"` | selector target for local client actions |
@@ -1395,6 +1555,7 @@ override.
 | `icon="x"`      | icon text rendered before the label |
 | `disabled`      | disabled visual + skips focus |
 | `url="x"`       | when set, click submits the merged `data-*` to this URL (shared `closureFreeSubmit()` form) instead of dispatching the event. Default method: **POST**; `get`/`post`/`method=` pick another, as on `<closure-btn free>` |
+| `target="x"`    | (with `url`) name of the window or frame the answer opens in, as the `target` of a form (defaults to parent's `target`) |
 | `event="x"`     | event name to dispatch (defaults to parent's `event` then to `btn-action`) |
 | `target-id="x"` | element to receive the dispatched event (defaults to parent's `target-id` then to the parent button) |
 | `section="x"`   | section key when packaging `data-*` (defaults to parent's `section`) |
@@ -1414,6 +1575,23 @@ override.
   <closure-btn-item ct-role="delete" icon="🗑" data-id="42" class="red">Delete</closure-btn-item>
 </closure-btn>
 ```
+
+## Items that post to a URL
+
+An item with `url` sends the merged `data-*` to that URL. Its answer opens in
+the window named by its own `target`; an item without one takes the `target`
+of its menu, and with none in either the answer replaces the page.
+
+```html
+<closure-btn menu="Order" target="order-win" data-order="1001">
+  <closure-btn-item url="/orders/edit">Edit</closure-btn-item>
+  <closure-btn-item url="/orders/view" get>View</closure-btn-item>
+  <closure-btn-item url="/orders/print" target="print-win">Print</closure-btn-item>
+</closure-btn>
+```
+
+The three items send `order=1001`. *Edit* and *View* open in `order-win`, the
+window of the menu; *Print* opens in `print-win`, its own.
 
 ## CSS Variables
 
@@ -2485,6 +2663,7 @@ Dynamic requests expect JSON by default. Set `response="g-row"` on
 | Tag | Purpose |
 |---|---|
 | `<grid-col>`        | column definition (`name`, `label`, `width`, `align`, `fill`, `type`, `map-data-id`) |
+| `<grid-card>`       | the markup of one row: every row is painted as that card instead of as cells — see *Card rows* |
 | `<grid-key>`        | per-row identity (composed of one or more `name`s) |
 | `<grid-footer-buttons>` | extra buttons in the pagination footer (`side="left|center|right"`) |
 | `<grid-layout>`     | declarative container: hoists `page-size`, `min-rows`, `max-rows`, `scroll` onto the grid (child value wins over the host attribute) |
@@ -2596,6 +2775,8 @@ the keyboard while the selection drives a side panel.
 |---|---|
 | `refresh(opts)`        | reload data (`opts.goto = "<id>"` to scroll to a specific row after refresh) |
 | `updateRow(data)`      | re-render the **selected** row in place from `data` (merged onto it) — no reload; no-op if nothing is selected |
+| `refreshRow(row)`      | ask the server for one row with the `single-row` query and put the answer in its place; with no argument, the selected row — see *Refreshing one row from the server* |
+| `expectReturn(mode, row)` | an action that opens another window was launched for `row`: when this window gets the user back, `refreshRow(row)` (`mode` `"row"`) or the page asked for again in place (`"all"`). A `<closure-row-viewer>` calls it for its `return-refresh` children |
 | `.selectedRow` (getter)| the currently selected row object, or `null` |
 
 ## Events
@@ -2604,6 +2785,7 @@ the keyboard while the selection drives a side panel.
 |---|---|---|
 | `row-select` | yes | `{ row, index }` |
 | `row-focus`  | yes | `{ row, index }` |
+| `row-update` | yes | `{ row, index }` — the data of a row changed in place (`updateRow`, `refreshRow`); `row` is the same object as before |
 | `filter-change` (handled, not fired) | — | accepted from a paired `<closure-filter-bar>` |
 | `refresh` (handled, not fired) | — | reloads the grid; `detail` is passed to `refresh()` (e.g. `goto`). Fired *at* the grid by id (`dispatch-event` / `signal-event`) |
 | `refresh-row` (handled, not fired) | — | re-renders the **selected** row from `detail` (a `data-row` JSON string, or the `data-*` fields). Ignores events bubbling from children |
@@ -2630,6 +2812,128 @@ Use `refresh` (with optional `data-goto`) instead when several rows may have
 changed; `refresh-row` only touches the selected row. The same events also pair
 with a delayed `<signal-event name="refresh" target-id="usersGrid" delay="…">`
 for polling.
+
+## Refreshing one row from the server
+
+A grid asks for pages with its `<query-definition>`. A second one, named
+`single-row`, asks for **one row**: a form of its own, with its url, its method
+and its fields. `bind="row.field"` takes the value of that field in the row
+being asked for — any field of the row, with or without a column. The other
+bindings (`filter.x`, a fixed `value`) work as in the query for pages, so the
+server can be told the filter too.
+
+```html
+<closure-data-grid id="usersGrid">
+  <grid-col name="username" label="User"></grid-col>
+  <grid-col name="status"   label="Status"></grid-col>
+
+  <!-- pages -->
+  <query-definition url="/admin/users/page"> … </query-definition>
+
+  <!-- one row -->
+  <query-definition name="single-row" url="/admin/users/one">
+    <query-param name="id"     bind="row.id"></query-param>
+    <query-param name="status" bind="filter.status"></query-param>
+  </query-definition>
+</closure-data-grid>
+```
+
+`refreshRow(row)` sends it; with no argument, for the selected row. The answer
+has the format of a page of the grid (JSON by default, `<g-row>` with
+`response="g-row"` on that `<query-definition>`), and does one of three things:
+
+| Answer | Effect |
+|---|---|
+| one row — `data: [row]`, or one `<g-row>` | replaces the data of that row, in place |
+| `result.remove` true — `<query-result remove>` in a `<g-row>` answer | the row leaves the list: it is gone, or no longer belongs to what the grid shows. An inline or static grid drops it; a dynamic grid asks for its page again, staying where the user was |
+| neither of them, an `error`, or a request that fails | the row stays as it is |
+
+A replaced row fires `row-update`: a `<closure-row-viewer>` on that row, and a
+detail grid fed by `detail-rows`, show the new data. An inline grid can have a
+`single-row` query too, even though its pages come written in the page.
+
+To do this when the user **comes back from another window** (an edit opened
+with a `target`), mark the action `return-refresh` inside a
+`<closure-row-viewer>` — see there — or inside the `<grid-card>` of the grid.
+
+## Card rows
+
+A grid paints a row as one line of cells, one per `<grid-col>`. When a row
+does not fit in a line — it wants two or three lines, a big button, a part
+that opens and closes — give the grid a `<grid-card>`: the markup of **one
+row**. Every row is then painted as that card.
+
+```html
+<closure-data-grid id="usersGrid" page-size="10">
+  <grid-card><template>
+    <closure-status-bar>
+      <status-part border>
+        <form action="/admin/users/edit" method="post" target="user-edit" return-refresh="row">
+          <input type="hidden" name="id" bind="id">
+          <button type="submit" bind="username"></button>
+        </form>
+      </status-part>
+      <status-kv key="Name" bind="fullname"></status-kv>
+      <status-kv key="State" bind-show="locked">locked</status-kv>
+    </closure-status-bar>
+    <ul bind-rows="sessions">
+      <li><span bind="device"></span> since <span bind="since"></span></li>
+    </ul>
+  </template></grid-card>
+
+  <query-definition url="/admin/users/page"> … </query-definition>
+  <query-definition name="single-row" url="/admin/users/one">
+    <query-param name="id" bind="row.id"></query-param>
+  </query-definition>
+</closure-data-grid>
+```
+
+The fields of the row are written by the binding attributes of
+`<closure-row-viewer>`, with the same meaning: `bind`, `bind-show`,
+`bind-hide`, `bind-crlf`, `map-data-id`, `map-show`, and `bind-rows` for a
+list that comes inside the row. The card is free markup: its look is the
+page's, the grid only adds the mark of the selected one.
+
+The attributes for buttons and composed texts work in a card too:
+`bind-data-key` (a field sent under a name of its own), `abind-text` and
+`abind-tooltip` with their `-format`, and `..field` to read, from a row of a
+list, the row that holds it. A `<closure-btn>` — free, or a menu with its
+`<closure-btn-item>` — placed in the card sends the fields of its row; see
+*Buttons that send fields of the row* and *Texts made of several fields* in
+`<closure-row-viewer>`.
+
+The markup goes inside a `<template>`, so that nothing in it starts working
+before it is copied: a card can then hold any component — a
+`<closure-status-bar>` with its parts, as above — and each copy builds
+itself in its card, with the values of its row. A component is bound before
+it builds itself: it receives the value as its content, which is what a
+display component such as `<status-kv>` reads. A card of plain markup, with
+no components, can also be written directly inside `<grid-card>`.
+
+Everything else is the grid as always — rows written in the page or asked
+for with a `<query-definition>`, pages, filters, selection, the keyboard,
+`refreshRow`, a detail grid or a `<closure-row-viewer>` following the
+selected row. What changes with a `<grid-card>`:
+
+| | |
+|---|---|
+| `<grid-col>` | not painted: the card is the whole row |
+| header | none — there are no columns to title |
+| markup | a list of `.dg-card` blocks inside `.dg-cards` (the selected one is also `.focused`), not a table |
+| `return-refresh` | works inside the card as inside a `<closure-row-viewer>`: the form or link takes the user to another window and, on the way back, the grid asks for the row of that card |
+| `<details>` | a card painted again (`updateRow`, `refreshRow`) keeps open what the user had opened |
+
+> **Note — components need the `<template>`.** Written directly inside
+> `<grid-card>`, a component builds itself there, in the hidden original,
+> before the grid reads it; every card would then be a copy of something
+> already built (a `<status-kv>` with content shows its key twice).
+
+To open a row the user need not select it first: each card carries its own
+button. Selection is still there, for the keyboard and for whatever follows
+the selected row.
+
+> **Note:** `page-size="auto"` and `max-rows` size the grid by rows of one
+> line (34px). With cards, give `page-size` a number.
 
 ## Cell buttons
 
@@ -2788,6 +3092,22 @@ effect because sizing is calculated per column, not per cell.
 
 ## Behaviour
 
+> **Note — starting position of inline rows.** An inline grid starts on its
+> first row. To start elsewhere, write next to the rows the same
+> `<query-result>` a `response="g-row"` answer carries: `offset` is the
+> absolute index of the first row of the page and `select-index` the row
+> within it (their sum is the row; `offset` alone may carry it whole). It is
+> applied once, when the grid first renders. The absolute index of a row is
+> `detail.index` of `row-select`, so a page can keep it and write it back.
+>
+> ```html
+> <closure-data-grid id="users" page-size="20">
+>   <grid-col name="username" label="User"></grid-col>
+>   <query-result offset="40" select-index="7"></query-result>
+>   <g-row>…</g-row>
+> </closure-data-grid>
+> ```
+
 > **Note:** dynamic mode merges the live filter values from any paired
 > `<closure-filter-bar>` into the request. Filter changes auto-call
 > `refresh()` (resetting to page 1).
@@ -2829,13 +3149,14 @@ trivial implementation and are always loaded as a set.
 | Tag | Purpose |
 |---|---|
 | `<grid-col>`         | column descriptor: `name`, `label`, `width`, `align`, `fill`, `type`, `map-data-id` |
+| `<grid-card>`        | the markup of one row (inside a `<template>`), filled from its fields with the binding attributes of `<closure-row-viewer>`: with it the grid paints every row as that card instead of as cells |
 | `<grid-footer-buttons>` | extra pagination footer buttons; `side="left|center|right"` |
 | `<grid-key>`         | per-row identity (text content is one or more `name`s, comma-separated) |
 | `<grid-layout>`      | layout container: hoists `page-size`, `min-rows`, `max-rows`, `scroll="window\|continuous"` onto the grid (child value wins) |
 | `<g-row>`            | one row of inline data (contains `<g-col>` cells) |
 | `<g-col>`            | one cell inside `<g-row>`; `name="…"` matches a `<grid-col>` |
 | `<g-detail>`         | nested detail rows inside a `<g-row>`; `name="…"` becomes an array field |
-| `<query-definition>` | dynamic-mode endpoint: `url`, default headers / params |
+| `<query-definition>` | dynamic-mode endpoint: `url`, default headers / params. With `name="single-row"`, the query that asks for one row |
 | `<query-param>`      | maps an external value (filter, etc.) into a query parameter |
 | `<on-no-results>`    | markup rendered when the grid has no rows |
 | `<on-fetch-error>`   | markup rendered on dynamic-mode fetch failure |
@@ -2888,7 +3209,8 @@ trivial implementation and are always loaded as a set.
 
 Projects the currently selected (or focused) row of a
 `<closure-data-grid>` onto its descendants through `bind` attributes.
-Subscribes to the grid's `row-select` and `row-focus` events; while no
+Subscribes to the grid's `row-select` and `row-focus` events, and to
+`row-update` (the data of the row on show changed in place); while no
 row is selected it hides every bound child.
 
 ## Attributes
@@ -2910,9 +3232,132 @@ row is selected it hides every bound child.
 | `bind-hide="field=v"` | hide when `row[field] === v` |
 | `bind-keep-space`     | on `bind-show` / `bind-hide`, hide with `visibility` instead of `display` |
 | `bind-crlf="<br>"`    | when the bound text has line breaks, render via `innerHTML` with the given separator |
+| `bind-rows="field"`   | `row[field]` is a **list of rows**: the content of the element is the markup of one of them, repeated for each — see *Lists inside a row* |
+| `bind-data-key="field"` | set the attribute `data-key` to `row[field]` — on any element. The `data-*` of a button are the fields it sends, so this is how a field travels under a name of its own |
+| `abind-text="field"`  | write `row[field]` as the content of the element, like `bind` — for the elements where `bind` means something else (`<closure-btn>`) |
+| `abind-tooltip="field"` | set the tooltip of the element (its `title`) to `row[field]` |
+| `abind-text-format="…"` / `abind-tooltip-format="…"` | with several fields (`abind-tooltip="a,b"`), the text to build from them: `%1`, `%2`… are the fields in the order listed — see *Texts made of several fields* |
+| `..field` (in any of the above) | inside a `bind-rows` list, read the field from the row that **holds** the list — see *Lists inside a row* |
 | `map-data-id="id"`    | resolve through a `<data-map>` for icon / label / color substitution |
 | `map-show="icon"`     | with `map-data-id`, render only the icon part |
 | `map-show="label"`    | with `map-data-id`, render only the label part |
+
+These attributes are not the viewer's alone: the `<grid-card>` of a
+`<closure-data-grid>` paints each of its rows with the very same ones.
+
+## Lists inside a row
+
+A row can carry a list of rows in one of its fields — an array in a JSON
+answer, a `<g-detail>` in `<g-row>` markup. `bind-rows` writes it out: the
+element keeps, as written in the page, the markup of **one** row of the
+list, and gets one copy of it per row.
+
+```html
+<closure-row-viewer target="users-grid">
+  <span bind="username"></span>
+  <ul bind-rows="sessions" bind-show="sessions">
+    <li><span bind="device"></span> since <span bind="since"></span></li>
+  </ul>
+</closure-row-viewer>
+```
+
+Inside the element, `bind` and the other attributes read the row **of the
+list**, not the row that holds it. A list can hold lists. A field that is
+missing or is an empty list leaves the element empty, and `bind-show` on
+that same field hides it.
+
+A row of the list reaches the row that holds it — its master — with two
+dots before the name: `..field`. It works wherever a field is named
+(`bind`, `bind-show`, `bind-hide`, `bind-data-*`, `abind-*`). Each pair of
+dots climbs one level, so in a list inside a list `....field` reads two rows
+up; a level that does not exist reads as empty.
+
+```html
+<ul bind-rows="sessions">
+  <li><span bind="device"></span> of <span bind="..username"></span></li>
+</ul>
+```
+
+When the row of the list holds components, write it inside a `<template>`,
+the only child of the element — there none of them has built itself yet,
+and every copy must start from that:
+
+```html
+<div bind-rows="sessions"><template>
+  <closure-status-bar>
+    <status-kv key="Device" bind="device"></status-kv>
+    <status-kv key="Since" bind="since"></status-kv>
+  </closure-status-bar>
+</template></div>
+```
+
+## Buttons that send fields of the row
+
+A `<closure-btn>` sends its `data-*` attributes. `bind="a,b"` fills one per
+field, named as the field (`data-a`, `data-b`; `..a` also gives `data-a`).
+When the name to send is not the name of the field — or two rows have a field
+of the same name — `bind-data-key="field"` names it:
+
+```html
+<div bind-rows="lines">
+  <closure-btn free url="/orders/line" target="line-edit" return-refresh="row"
+               bind-data-order="..id" bind-data-line="id"
+               abind-text="number"></closure-btn>
+</div>
+```
+
+The button sends `order` (the `id` of the row that holds the list) and `line`
+(the `id` of the row of the list), and shows the number of the line.
+`bind-data-*` is not the button's alone: it sets the attribute on any element.
+
+A menu works the same way. The fields bound on the `<closure-btn menu>` go
+with every item, and an item adds its own:
+
+```html
+<div bind-rows="lines">
+  <closure-btn menu="Line" target="line-edit"
+               bind-data-order="..id" bind-data-line="id">
+    <closure-btn-item url="/orders/line/edit" return-refresh="row">Edit</closure-btn-item>
+    <closure-btn-item url="/orders/line/copy" target="_blank"
+                      bind-data-product="code">Copy</closure-btn-item>
+  </closure-btn>
+</div>
+```
+
+Both items send `order` and `line`; *Copy* also sends `product`. *Edit* opens
+in `line-edit`, the window of the menu, and *Copy* in a new one.
+
+## Texts made of several fields
+
+`abind-text` and `abind-tooltip` take one field or several, separated by
+commas. Several fields are joined by a space, or laid out by the matching
+`-format`, where `%1`, `%2`… stand for the fields in the order listed (`%%`
+is a percent sign):
+
+```html
+<closure-btn abind-text="number"
+             abind-tooltip="..order_number,number"
+             abind-tooltip-format="View order %1, line %2"></closure-btn>
+```
+
+When none of the fields has a value nothing is written: the element is left
+empty, or without tooltip, instead of showing the bare words of the format.
+
+## Actions that leave the window
+
+| Attribute on a descendant | Effect |
+|---|---|
+| `return-refresh="row"` | the element takes the user to **another window** with the row on show — a `<form>` or a link with a `target`. When the user comes back to this window, the grid asks the server for that row again (its `single-row` query) |
+| `return-refresh="all"` | the same, but the grid asks for its whole page again, staying where the user was |
+
+```html
+<closure-row-viewer target="users-grid">
+  <form action="/admin/users/edit" method="post" target="user-edit" return-refresh="row">
+    <input type="hidden" name="id" bind="id">
+    <button type="submit">Edit</button>
+  </form>
+</closure-row-viewer>
+```
 
 ## Properties
 
@@ -2937,7 +3382,8 @@ row is selected it hides every bound child.
 
 ## Behaviour
 
-> **Note:** elements with `[bind]` are hidden via `visibility: hidden`
+> **Note:** elements with `[bind]` — and those with `bind-data-*` or
+> `abind-*` — are hidden via `visibility: hidden`
 > (so layout is preserved) when no row is selected. Elements with
 > `[bind-show]` or `[bind-hide]` are hidden via `display: none`, unless
 > the child has `bind-keep-space` or the viewer has `keep-space`.
@@ -2951,6 +3397,18 @@ row is selected it hides every bound child.
 > **Note:** when a `<data-map>` resolution returns a `color` field, that
 > colour is applied to the bound element's `style.color`. Cleared on the
 > next bind without a colour.
+
+> **Note — `return-refresh`.** An edit opened in another window leaves this
+> page untouched, so the grid would go on showing the row as it was. A form
+> marked `return-refresh` tells the grid when it is **submitted**, any other
+> element when it is **clicked**; nothing is asked then. The request goes
+> when this window loses the user and gets them back (window `blur` then
+> `focus`, or the tab hidden and shown again). Several rows sent out before
+> coming back are all asked for; a user who never left asks for nothing. With
+> `"row"` the grid needs a `single-row` query; the viewer of a detail grid fed
+> by `detail-rows` refreshes the row of the master, which is where those rows
+> come from. An inline grid has nobody to ask for a page: there `"all"` reloads
+> the page.
 
 ---
 
@@ -3805,6 +4263,7 @@ configured logoff URL.
 | `extend-url="path"`   | POST here on click to extend the **server** session; without it, the click only resets the client countdown |
 | `expire-url="path"`   | POST here when the countdown reaches zero (browser navigates to whatever the server responds); without it, only the `session-expired` event fires |
 | `activity-reset`      | also reset the countdown on any mouse / keyboard / touch activity |
+| `resume-extend`       | when the browser puts the page back from its memory (going back or forward without loading it again), do what a click on the button does (see *Behaviour*) |
 | `data-*`              | sent as form fields with both `extend-url` and `expire-url` POSTs (e.g. `data-sid="…"`) |
 
 ### `extend-url` JSON contract
@@ -3845,7 +4304,8 @@ Anything else → `session-extend-failed` event, **no** countdown reset.
   extend-url="/admin/keep-alive"
   expire-url="/admin/logoff"
   data-sid="abc123"
-  activity-reset></session-keep-alive>
+  activity-reset
+  resume-extend></session-keep-alive>
 ```
 
 ## CSS Variables
@@ -3870,5 +4330,18 @@ Anything else → `session-extend-failed` event, **no** countdown reset.
 > document with `passive: true` and removed on disconnect. They reset
 > the countdown but do **not** call the server — only the explicit
 > button click hits `extend-url`.
+
+> **Note — a page put back from memory.** Going back or forward, the browser
+> may show the page from its memory exactly as it was, without loading it
+> again. The countdown then still points at the deadline it had when the
+> page was left: it shows what is left of that old deadline, and expires at
+> once when the deadline has passed — even if the user kept working on other
+> pages meanwhile. With `resume-extend` the element does then what a click on
+> the button does: with `extend-url` it asks the server and takes the
+> countdown it answers (or follows its redirect); without `extend-url` it
+> restarts the client countdown. If the server cannot be asked
+> (`session-extend-failed`) the countdown goes on towards the old deadline.
+> Without the attribute nothing changes, and the element listens to nothing
+> of the page.
 
 ---

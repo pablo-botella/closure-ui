@@ -90,6 +90,22 @@ fields so they survive. A GET with **no fields at all** (and no
 `opts.target`) skips the form entirely and navigates plainly — no bare
 `?` is appended to the url.
 
+## `closureBindRow(root, row, opts?)`
+
+Writes the fields of `row` onto the descendants of `root` that carry binding
+attributes. It is the one implementation behind `<closure-row-viewer>` and
+the `<grid-card>` of `<closure-data-grid>`, so both read the same attributes
+the same way: `bind`, `bind-show`, `bind-hide`, `bind-keep-space`,
+`bind-crlf`, `map-data-id`, `map-show`, `bind-rows`, `bind-data-*`,
+`abind-text` and `abind-tooltip` — described under `<closure-row-viewer>`.
+
+`root` is an element or a `DocumentFragment`; it need not be in the page.
+`opts.keepSpace` hides every `bind-show` / `bind-hide` with `visibility`
+instead of `display`. A field the row lacks, or `null`, is the empty text.
+`opts.parents` lists the rows above `row`, nearest first: they are what a
+field name written `..field` reads. The rows of a `bind-rows` list get
+theirs without being asked — the row that holds the list.
+
 ---
 %%>*/
 
@@ -160,6 +176,223 @@ function closureFreeSubmit(el, url, defaultMethod, opts) {
   form.submit();
   form.remove(); // drop the node post-submit so it can't orphan
                  // in <body> on a download / new-tab action
+}
+
+// ---- Row binding: shared by <closure-row-viewer> and the <grid-card> of
+// <closure-data-grid>, so the same attributes mean the same in both ----
+
+// Where a field name reads: each leading ".." climbs one level, from a row of
+// a bind-rows list to the row that holds it (detail to master). `parents`
+// lists the rows above, nearest first; a level that does not exist reads
+// nothing. Returns the row to read and the name without its dots
+function closureRowField(row, field, parents) {
+  field = String(field === undefined || field === null ? '' : field);
+  var up = 0;
+  while (field.substring(0, 2) === '..') { up++; field = field.substring(2); }
+  return { row: up === 0 ? row : ((parents && parents[up - 1]) || null), name: field };
+}
+
+// The value of a field of a row, as text. A field the row lacks, or null, is
+// the empty text
+function closureRowText(row, field, parents) {
+  var at = closureRowField(row, field, parents);
+  var v = at.row ? at.row[at.name] : undefined;
+  return v === undefined || v === null ? '' : String(v);
+}
+
+// Whether a row meets a bind-show / bind-hide condition: "field" (the field
+// has a value — row values are text, so "0" and "false" count as none) or
+// "field=value"
+function closureRowMatches(row, cond, parents) {
+  var eq = cond.indexOf('=');
+  if (eq < 0) {
+    var actual = closureRowText(row, cond, parents).trim().toLowerCase();
+    return actual !== '' && actual !== '0' && actual !== 'false';
+  }
+  return closureRowText(row, cond.substring(0, eq), parents) === cond.substring(eq + 1);
+}
+
+// Shows or hides the element of a bind-show / bind-hide. keepSpace (or its
+// own bind-keep-space): hidden with `visibility`, so it keeps its place
+function closureBindVisible(el, isVisible, keepSpace) {
+  if (isVisible) {
+    el.style.display = '';
+    el.style.visibility = 'visible';
+  } else if (keepSpace || el.hasAttribute('bind-keep-space')) {
+    el.style.display = '';
+    el.style.visibility = 'hidden';
+  } else {
+    el.style.display = 'none';
+    el.style.visibility = '';
+  }
+}
+
+// The descendants of root that match selector and belong to root's own row:
+// what is inside a [bind-rows] block belongs to the rows of that list
+function closureBindOwn(root, selector) {
+  return Array.prototype.filter.call(root.querySelectorAll(selector), function(el) {
+    var block = el.parentElement ? el.parentElement.closest('[bind-rows]') : null;
+    return !block || block === root || !root.contains(block);
+  });
+}
+
+// bind-rows="field": the content of the element is the markup of ONE row of
+// that list; it is repeated for each of them, each copy bound to its row.
+// The markup is kept the first time, so the element can be bound again
+// (a viewer changes row). No list, or row null: the element is left empty.
+// The markup may come inside a <template>, the only child: there no
+// component has built itself yet, which a copy must start from.
+function closureBindLists(root, row, opts) {
+  closureBindOwn(root, '[bind-rows]').forEach(function(block) {
+    if (block._closureRowsMarkup === undefined) {
+      var only = block.children.length === 1 ? block.firstElementChild : null;
+      block._closureRowsMarkup = only && only.tagName === 'TEMPLATE' ? only.innerHTML : block.innerHTML;
+    }
+    var list = row ? row[block.getAttribute('bind-rows')] : null;
+    block.textContent = '';
+    if (!Array.isArray(list)) return;
+    // The rows of the list read the row that holds them as "..field"
+    var inner = {};
+    for (var k in (opts || {})) inner[k] = opts[k];
+    inner.parents = [row].concat((opts && opts.parents) || []);
+    list.forEach(function(item) {
+      var tpl = document.createElement('template');
+      tpl.innerHTML = block._closureRowsMarkup;
+      closureBindRow(tpl.content, item && typeof item === 'object' ? item : {}, inner);
+      block.appendChild(tpl.content);
+    });
+  });
+}
+
+// The own descendants of root (see closureBindOwn) that carry an attribute
+// with its target in the name: bind-data-<key> or abind-<what>
+function closureBindNamed(root) {
+  var found = Array.prototype.filter.call(root.querySelectorAll('*'), function(el) {
+    var attrs = el.attributes;
+    for (var i = 0; i < attrs.length; i++) {
+      var n = attrs[i].name;
+      if (n.indexOf('bind-data-') === 0 || n.indexOf('abind-') === 0) return true;
+    }
+    return false;
+  });
+  return found.filter(function(el) {
+    var block = el.parentElement ? el.parentElement.closest('[bind-rows]') : null;
+    return !block || block === root || !root.contains(block);
+  });
+}
+
+// The text of an abind-<what>-format: %1, %2… are the values, in the order
+// the fields were listed; %% is a percent sign
+function closureBindFormat(format, values) {
+  return format.replace(/%(%|\d+)/g, function(whole, n) {
+    if (n === '%') return '%';
+    var v = values[parseInt(n, 10) - 1];
+    return v === undefined ? '' : v;
+  });
+}
+
+// Writes a text as the content of an element: the `value` of a control or
+// of a component that exposes one, the text of anything else (bind-crlf: its
+// line breaks as the given separator)
+function closureBindWrite(el, val) {
+  var tag = el.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || ('value' in el && tag.indexOf('-') >= 0)) {
+    // Controls, and components that expose `.value`, take it there
+    el.value = val;
+    return;
+  }
+  var crlf = el.getAttribute('bind-crlf');
+  if (crlf && val.indexOf('\n') >= 0) {
+    // val is row data — escape it so only the author-provided
+    // crlf separator is interpreted as HTML
+    var esc = val.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    el.innerHTML = esc.replace(/\r?\n/g, crlf);
+  } else {
+    el.textContent = val;
+  }
+}
+
+// bind-data-<key>="field": the attribute data-<key> — the payload a button
+// sends. abind-text / abind-tooltip="field[,field…]": the content of the
+// element / its tooltip, the fields joined by a space or laid out by the
+// matching -format; with no value in any of its fields, nothing is shown
+function closureBindNamedAttrs(el, row, parents) {
+  Array.prototype.slice.call(el.attributes).forEach(function(attr) {
+    var name = attr.name;
+    if (name.indexOf('bind-data-') === 0) {
+      var key = name.substring(10);
+      if (key) el.setAttribute('data-' + key, closureRowText(row, attr.value.trim(), parents));
+      return;
+    }
+    if (name !== 'abind-text' && name !== 'abind-tooltip') return;
+    var values = attr.value.split(',').map(function(s) { return s.trim(); }).filter(Boolean)
+      .map(function(f) { return closureRowText(row, f, parents); });
+    var text = '';
+    if (values.some(function(v) { return v !== ''; })) {
+      var format = el.getAttribute(name + '-format');
+      text = format === null ? values.join(' ') : closureBindFormat(format, values);
+    }
+    if (name === 'abind-text') closureBindWrite(el, text);
+    else if (text) el.setAttribute('title', text);
+    else el.removeAttribute('title');
+  });
+}
+
+function closureBindRow(root, row, opts) {
+  opts = opts || {};
+
+  // Conditional visibility
+  var parents = opts.parents || [];
+  closureBindOwn(root, '[bind-show]').forEach(function(el) {
+    closureBindVisible(el, closureRowMatches(row, el.getAttribute('bind-show') || '', parents), opts.keepSpace);
+  });
+  closureBindOwn(root, '[bind-hide]').forEach(function(el) {
+    closureBindVisible(el, !closureRowMatches(row, el.getAttribute('bind-hide') || '', parents), opts.keepSpace);
+  });
+
+  closureBindOwn(root, '[bind]').forEach(function(el) {
+    var bind = el.getAttribute('bind');
+    if (!bind) return;
+    var tag = el.tagName;
+
+    // <closure-btn> / <closure-btn-item> take the fields as data-*: their
+    // payload, one attribute per field, named as the field without its ".."
+    if (tag === 'CLOSURE-BTN' || tag === 'CLOSURE-BTN-ITEM') {
+      bind.split(',').map(function(s) { return s.trim(); }).filter(Boolean).forEach(function(f) {
+        el.setAttribute('data-' + closureRowField(row, f, parents).name, closureRowText(row, f, parents));
+      });
+      return;
+    }
+    if (bind.indexOf(',') >= 0) return; // several fields: only those buttons take them
+
+    var val = closureRowText(row, bind, parents);
+    var mapId = el.getAttribute('map-data-id');
+    if (mapId) {
+      var map = document.getElementById(mapId);
+      var resolved = map ? map.resolve(val) : null;
+      if (resolved) {
+        var show = el.getAttribute('map-show') || '';
+        var display = '';
+        if (show === 'icon') display = resolved.icon || '';
+        else if (show === 'label') display = resolved.label || '';
+        else {
+          if (resolved.icon) display += resolved.icon;
+          if (resolved.label) display += (display ? ' ' : '') + resolved.label;
+        }
+        el.textContent = display || val;
+        el.style.color = resolved.color || '';
+      } else {
+        el.textContent = val;
+        el.style.color = '';
+      }
+    } else {
+      closureBindWrite(el, val);
+    }
+  });
+
+  closureBindNamed(root).forEach(function(el) { closureBindNamedAttrs(el, row, parents); });
+
+  closureBindLists(root, row, opts);
 }
 
 // ClosureMacroError: a <ss:key> / <ls:key> macro named a key that is not in the

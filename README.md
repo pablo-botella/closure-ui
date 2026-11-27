@@ -92,6 +92,7 @@ examples) is generated into [`release/closure-ui.md`](release/closure-ui.md).
 | `<closure-data-source>` | shared data source for grids and forms |
 | `<fingerprint-hands>` | fingerprint UI affordance |
 | `<session-keep-alive>` | keeps a session alive in the background |
+| `<closure-history>` | remembers, per browser-history entry, where each piece of the page was |
 | `ClosureResponse` | global object for handling responses from `<target-closure>` |
 
 Plus a small set of shared helpers (e.g. `applyWidthRange`, clock-time
