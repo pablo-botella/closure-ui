@@ -11,7 +11,6 @@ on:
 
 permissions:
   contents: write
-  id-token: write # npm trusted publishing + provenance, both via OIDC
 
 jobs:
   release:
@@ -79,18 +78,11 @@ jobs:
             release/checksums.txt \
             release/release-info.txt
 
-      # The npm package was staged by the release build (release/npm:
-      # bundle pair + composed README + LICENSE + package.json born from
-      # the manifest). Publishing it reaches npm/pnpm/yarn/bun/Deno and
-      # the unpkg/jsDelivr CDNs in one shot.
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24 # trusted publishing needs npm >= 11.5.1
-          registry-url: https://registry.npmjs.org
-
-      # Trusted publishing (OIDC): no token — npm trusts this workflow as
-      # configured in the package's Trusted Publisher settings, and attaches
-      # provenance on its own.
-      # the ./ prefix is load-bearing: a bare release/npm reads as a
-      # GitHub owner/repo shorthand, not a folder
-      - run: npm publish ./release/npm --access public
+      # The npm package is not published from here. The release build stages
+      # it (release/npm: bundle pair + composed README + LICENSE +
+      # package.json born from the manifest) and it is published by hand,
+      # from a checkout of the tag:
+      #   go -C .build run ./release
+      #   npm publish ./release/npm --access public
+      # (the ./ prefix is load-bearing: a bare release/npm reads as a
+      # GitHub owner/repo shorthand, not a folder)

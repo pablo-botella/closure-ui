@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <mkskill>
   <version-spec params="major:byte,minor:byte,build:byte">
-    <version major="0" minor="0" build="15">
-      <ts>2026-11-27T16:30:51Z</ts>
+    <version major="0" minor="0" build="16">
+      <ts>2026-11-27T17:02:19Z</ts>
     </version>
-    <label key="title" volatile="true" default-to-ts="true">2026-11-27T16:30:51Z</label>
+    <label key="title" volatile="true" default-to-ts="true">2026-11-27T17:02:19Z</label>
     <update file="/.build/next-release.json" type="json">
       <entry key="tag">{$$$ version $$$}</entry>
       <entry key="title">{$$$ version $$$}{$$$ &#39; - &#39; + label:title $$$}</entry>
@@ -16,6 +16,8 @@ git rev-parse -q --verify refs/tags/%TAG% &gt;NUL 2&gt;&amp;1 &amp;&amp; goto :e
 git ls-remote --exit-code --tags origin %TAG% &gt;NUL 2&gt;&amp;1 &amp;&amp; goto :exists
 git tag %TAG%
 git push origin main --tags
+call npm login
+pause
 exit /b 0
 :exists
 echo ERROR: tag %TAG% already exists - run -vinc first
@@ -30,6 +32,7 @@ exit /b 1
     <import-miniskin content="./src" fm-gen="extern,preserve"></import-miniskin>
   </project>
   <version-history max="10">
+    <release version="v0.0.16" ts="2026-11-27T17:02:19Z" title="2026-11-27T17:02:19Z" method="vinc-build"></release>
     <release version="v0.0.15" ts="2026-11-27T16:30:51Z" title="2026-11-27T16:30:51Z" method="vinc-build"></release>
     <release version="v0.0.14" ts="2026-11-20T11:46:36Z" title="2026-11-20T11:46:36Z" method="vinc-build"></release>
     <release version="v0.0.13" ts="2026-11-20T11:46:35Z" title="2026-11-20T11:46:35Z" method="vinc-build"></release>
